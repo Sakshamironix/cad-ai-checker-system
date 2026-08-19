@@ -1,0 +1,36 @@
+{
+  "name": "CAD AI Checker",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/conda/envs/cad-ai-checker/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ]
+      }
+    }
+  },
+  "forwardPorts": [
+    8501
+  ],
+  "portsAttributes": {
+    "8501": {
+      "label": "Streamlit CAD AI Checker",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "python --version && python -c \"import cadquery, ezdxf, streamlit; print('CAD environment is ready')\"",
+  "remoteEnv": {
+    "PYTHONPATH": "${containerWorkspaceFolder}"
+  }
+}
