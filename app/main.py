@@ -1,4 +1,4 @@
-"""Milestone 6 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 7 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -12,13 +12,14 @@ from app.comparison_rules import (
     EngineeringJudgement,
     evaluate_matching_result,
 )
+from app.dashboard import build_dashboard_rows
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.feature_matcher import FeatureMatchingResult, match_features
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 6 — Comparison rules and prototype judgement"
+APP_STAGE: Final = "Milestone 7 — Trial-ready PASS/FAIL dashboard"
 
 
 def get_app_status() -> dict[str, str]:
@@ -26,7 +27,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "Traceable PASS, FAIL, or REVIEW engineering judgement",
+        "capability": "Operator-ready tolerance comparison dashboard",
     }
 
 
@@ -454,12 +455,13 @@ def _render_dxf_uploader() -> None:
 
 
 def _render_matching_uploader() -> None:
-    """Render the paired DXF/STEP upload and basic matching workflow."""
+    """Render the paired DXF/STEP upload and trial dashboard workflow."""
     st.write(
         "Upload one interpreted DXF drawing and one STEP/STP model. The prototype matches "
         "overall size, linear dimensions, diameter/radius requirements, and circle-based "
         "hole candidates."
     )
+    st.markdown("#### 1. Select the two CAD files")
     upload_columns = st.columns(2)
     with upload_columns[0]:
         dxf_file = st.file_uploader(
@@ -478,24 +480,120 @@ def _render_matching_uploader() -> None:
             help="Prototype limit: 25 MB.",
         )
 
-    if dxf_file is None or step_file is None:
-        st.info("Select both files to begin basic 2D-to-3D feature matching.")
+    st.markdown("#### 2. Set the fallback tolerance")
+    default_tolerance_mm = st.number_input(
+        "Default tolerance for requirements without a drawing tolerance (mm)",
+        min_value=0.001,
+        max_value=10.0,
+        value=0.1,
+        step=0.01,
+        format="%.3f",
+        help=(
+            "An explicit DXF tolerance takes priority. This value is used only when the "
+            "drawing provides no usable tolerance."
+        ),
+    )
+
+    ready = dxf_file is not None and step_file is not None
+    run_check = st.button(
+        "Run CAD Check",
+        type="primary",
+        disabled=not ready,
+        use_container_width=True,
+    )
+
+    if not ready:
+        st.info("Select both files, then press Run CAD Check.")
         return
 
-    try:
-        with st.spinner("Reading both CAD files and matching available features..."):
-            dxf_analysis = analyze_dxf_bytes(dxf_file.getvalue(), dxf_file.name)
-            requirements = interpret_dxf_analysis(dxf_analysis)
-            step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
-            matching_result = match_features(requirements, step_analysis)
-            judgement = evaluate_matching_result(matching_result)
-    except (DxfReaderError, StepReaderError, ValueError) as exc:
-        st.error(str(exc))
-        return
+    current_signature = (
+        dxf_file.name,
+        len(dxf_file.getvalue()),
+        step_file.name,
+        len(step_file.getvalue()),
+        float(default_tolerance_mm),
+    )
 
+    if not run_check:
+        stored = st.session_state.get("cad_check_result")
+        if stored is None or stored["signature"] != current_signature:
+            st.info("Files are ready. Press Run CAD Check to calculate the result.")
+            return
+        dxf_analysis = stored["dxf_analysis"]
+        requirements = stored["requirements"]
+        step_analysis = stored["step_analysis"]
+        matching_result = stored["matching_result"]
+        judgement = stored["judgement"]
+    else:
+        try:
+            with st.spinner("Reading both CAD files and calculating the comparison..."):
+                dxf_analysis = analyze_dxf_bytes(dxf_file.getvalue(), dxf_file.name)
+                requirements = interpret_dxf_analysis(dxf_analysis)
+                step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
+                matching_result = match_features(
+                    requirements,
+                    step_analysis,
+                    default_tolerance_mm=float(default_tolerance_mm),
+                )
+                judgement = evaluate_matching_result(matching_result)
+        except (DxfReaderError, StepReaderError, ValueError) as exc:
+            st.error(str(exc))
+            return
+
+        st.session_state["cad_check_result"] = {
+            "signature": current_signature,
+            "dxf_analysis": dxf_analysis,
+            "requirements": requirements,
+            "step_analysis": step_analysis,
+            "matching_result": matching_result,
+            "judgement": judgement,
+        }
+
+    st.divider()
+    st.markdown("#### 3. Review the result")
+    file_columns = st.columns(3)
+    file_columns[0].metric("2D drawing", judgement.drawing_source)
+    file_columns[1].metric("3D model", judgement.model_source)
+    file_columns[2].metric("Fallback tolerance", f"±{default_tolerance_mm:.3f} mm")
     _render_engineering_judgement(judgement)
-    st.subheader("Feature matching evidence")
-    _render_feature_matches(matching_result)
+
+    dashboard_rows = build_dashboard_rows(matching_result, judgement)
+    selected_outcomes = st.multiselect(
+        "Show outcomes",
+        options=[FAIL, "REVIEW", PASS],
+        default=[FAIL, "REVIEW", PASS],
+    )
+    visible_rows = [row for row in dashboard_rows if row.outcome in selected_outcomes]
+    st.dataframe(
+        [
+            {
+                "#": row.check_number,
+                "Result": row.outcome,
+                "Check": row.requirement,
+                "Drawing (mm)": row.drawing_value_mm,
+                "Allowed min (mm)": row.allowed_minimum_mm,
+                "Allowed max (mm)": row.allowed_maximum_mm,
+                "3D feature": row.model_feature,
+                "3D value (mm)": row.model_value_mm,
+                "Difference (mm)": row.difference_mm,
+                "Outside limit (mm)": row.outside_limit_by_mm,
+                "Confidence": row.confidence,
+                "DXF entity": row.source_entity,
+                "Reason": row.reason,
+            }
+            for row in visible_rows
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander("Supporting CAD analysis"):
+        st.markdown("##### STEP model summary")
+        _render_step_results(step_analysis)
+        st.markdown("##### DXF drawing summary")
+        _render_dxf_results(dxf_analysis, requirements)
+        st.markdown("##### Raw feature-matching evidence")
+        _render_feature_matches(matching_result)
 
 
 def render_app() -> None:
@@ -507,19 +605,19 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 6 applies traceable rules and produces a prototype PASS, FAIL, or REVIEW "
-        "judgement."
+        "Milestone 7 provides a trial-ready dashboard using deterministic geometry and "
+        "tolerance rules."
     )
 
     step_tab, dxf_tab, matching_tab = st.tabs(
-        ["3D STEP/STP", "2D DXF", "2D ↔ 3D Match"]
+        ["Run CAD Check", "Inspect 3D STEP/STP", "Inspect 2D DXF"]
     )
     with step_tab:
-        _render_step_uploader()
-    with dxf_tab:
-        _render_dxf_uploader()
-    with matching_tab:
         _render_matching_uploader()
+    with dxf_tab:
+        _render_step_uploader()
+    with matching_tab:
+        _render_dxf_uploader()
 
 
 if __name__ == "__main__":
