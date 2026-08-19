@@ -1,0 +1,33 @@
+# Python build and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+
+# Local environments and editor settings
+.venv/
+venv/
+.env
+.vscode/
+
+# Streamlit runtime state
+.streamlit/secrets.toml
+
+# Temporary uploads: never commit customer CAD files
+uploads/*
+!uploads/.gitkeep
+*.step
+*.stp
+*.iges
+*.igs
+*.dxf
+*.prt
+*.sldprt
+*.catpart
+
+# Operating-system files
+.DS_Store
+Thumbs.db

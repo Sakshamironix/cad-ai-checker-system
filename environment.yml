@@ -1,0 +1,12 @@
+name: cad-ai-checker
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cadquery=2.5.*
+  - numpy=1.26.*
+  - pip
+  - pip:
+      - streamlit==1.49.1
+      - ezdxf==1.4.2
+      - pytest==8.3.5

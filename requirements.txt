@@ -1,0 +1,5 @@
+# Python packages installed after the Conda CAD environment is created.
+# CadQuery/OpenCASCADE and NumPy are installed from conda-forge via environment.yml.
+streamlit==1.49.1
+ezdxf==1.4.2
+pytest==8.3.5
