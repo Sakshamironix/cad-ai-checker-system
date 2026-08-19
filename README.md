@@ -4,7 +4,7 @@ A browser-first prototype for checking whether a 2D DXF engineering drawing agre
 
 ## Milestone status
 
-Milestones 1 and 2 established the repository foundation and STEP/STP reader. Milestone 3 adds an independent DXF reader:
+Milestones 1–3 established the repository foundation and independent STEP/STP and DXF readers. Milestone 4 interprets raw DXF entities as basic engineering requirements:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
 - STEP/STP upload with a 25 MB prototype limit.
@@ -15,12 +15,19 @@ Milestones 1 and 2 established the repository foundation and STEP/STP reader. Mi
 - DXF version, drawing units, layer names, model-space entity counts, and drawing extents.
 - Circle and arc geometry, TEXT/MTEXT annotations, and DIMENSION measurements.
 - Separate Streamlit tabs for 3D STEP/STP and 2D DXF analysis.
+- Normalized nominal dimensions with symmetric or asymmetric deviations.
+- Supported tolerance formats including `±`, `+/-`, `+-`, and `+value/-value`.
+- General-tolerance detection from DXF TEXT/MTEXT notes and application to dimensions without explicit tolerance.
+- Calculated minimum and maximum dimensional limits.
+- Diameter, radius, angle, ordinate, and linear dimension classification.
+- Circle-based hole candidates with center coordinates and diameter.
+- Clear warnings for unitless drawings, unresolved dimensions, missing tolerances, missing extents, and missing hole candidates.
 - Synthetic STEP tests generated at runtime, so no CAD test files are committed.
 - Synthetic DXF tests generated at runtime, including geometry, annotations, and a linear dimension.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-2D drawing interpretation and 2D/3D feature matching are deliberately outside this milestone.
+2D-to-3D feature matching is deliberately outside this milestone and begins in Milestone 5.
 
 ## Repository layout
 
@@ -58,6 +65,7 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - Streamlit starts at `http://localhost:8501` inside the container and the Codespaces forwarded-port page displays **CAD AI Checker**.
 - Uploading a valid small STEP/STP part displays its topology, dimensions, physical properties, and detected basic geometry.
 - Uploading a valid small DXF drawing displays its layers, entity counts, extents, circles, arcs, dimensions, and text.
+- The DXF dashboard also displays interpreted requirements, calculated limits, tolerance sources, drawing notes, and circle-based hole candidates.
 
 ## If setup fails
 
