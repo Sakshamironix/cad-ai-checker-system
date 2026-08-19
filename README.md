@@ -4,7 +4,7 @@ A browser-first prototype for checking whether a 2D DXF engineering drawing agre
 
 ## Milestone status
 
-Milestones 1–4 established the repository foundation, CAD readers, and DXF requirement interpretation. Milestone 5 adds basic 2D-to-3D feature matching:
+Milestones 1–5 established the repository foundation, CAD readers, DXF interpretation, and basic feature matching. Milestone 6 adds comparison rules and final prototype judgement:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
 - STEP/STP upload with a 25 MB prototype limit.
@@ -30,12 +30,20 @@ Milestones 1–4 established the repository foundation, CAD readers, and DXF req
 - Circle-candidate matching to likely STEP holes by diameter.
 - Explicit matched, out-of-tolerance, missing-candidate, unsupported, and unmatched-3D statuses.
 - Traceable differences, applied deviations, tolerance sources, confidence, and matching reasons.
+- Rule-level outcomes linked to each feature match and source DXF entity.
+- `PASS` for supported medium/high-confidence comparisons inside their allowed limits.
+- `FAIL` for tolerance violations, missing compatible 3D features, and unmatched likely STEP holes.
+- `REVIEW` for unsupported requirements, low-confidence matches, incomplete evidence, and empty comparisons.
+- Failure-first decision precedence: any mandatory failure produces an overall `FAIL`.
+- Passed, failed, review, decisive-count, and decisive-pass-rate summaries.
+- Explicit policy settings for missing features, unmatched 3D features, confidence, unsupported requirements, and minimum comparisons.
+- A permanent warning that prototype judgement is not production release approval.
 - Synthetic STEP tests generated at runtime, so no CAD test files are committed.
 - Synthetic DXF tests generated at runtime, including geometry, annotations, and a linear dimension.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-Full pass/fail comparison rules and final engineering judgement are deliberately outside this milestone and begin in Milestone 6.
+Advanced visual evidence and linked 2D/3D highlighting are deliberately outside this milestone and begin in Milestone 8. A basic dashboard is already available for the first trial.
 
 ## Repository layout
 
@@ -75,6 +83,7 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - Uploading a valid small DXF drawing displays its layers, entity counts, extents, circles, arcs, dimensions, and text.
 - The DXF dashboard also displays interpreted requirements, calculated limits, tolerance sources, drawing notes, and circle-based hole candidates.
 - The matching dashboard accepts both files and displays basic size and hole matches with status, difference, tolerance, confidence, and reason.
+- The same dashboard now displays the overall prototype judgement and every rule finding before the supporting feature-match evidence.
 
 ## Milestone 5 limitations
 
@@ -82,6 +91,20 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - Drawing extents can include annotation geometry and therefore remain low-confidence matching inputs.
 - Linear dimensions are matched only against overall STEP bounding-box axes in this milestone.
 - Angular, ordinate, GD&T, datum, thread, surface-finish, and positional requirements remain unresolved.
+
+## Milestone 6 judgement policy
+
+| Matching result | Rule outcome |
+|---|---|
+| Supported match inside limits | PASS |
+| Low-confidence match inside limits | REVIEW |
+| Outside drawing tolerance | FAIL |
+| No compatible 3D candidate | FAIL |
+| Unmatched likely 3D hole | FAIL |
+| Unsupported requirement | REVIEW |
+| No comparable evidence | REVIEW |
+
+The overall decision uses `FAIL` before `REVIEW` before `PASS`. This is intentionally conservative and remains a prototype engineering aid.
 
 ## If setup fails
 
