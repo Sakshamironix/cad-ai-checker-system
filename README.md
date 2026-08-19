@@ -4,18 +4,23 @@ A browser-first prototype for checking whether a 2D DXF engineering drawing agre
 
 ## Milestone status
 
-Milestone 1 established the repository foundation. Milestone 2 adds a working STEP/STP reader:
+Milestones 1 and 2 established the repository foundation and STEP/STP reader. Milestone 3 adds an independent DXF reader:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
 - STEP/STP upload with a 25 MB prototype limit.
 - Solid, shell, face, edge, and vertex counts.
 - X/Y/Z bounding-box dimensions, volume, surface area, and center of mass.
 - Planar face, cylindrical face, circular edge, outer-boundary, and likely-hole detection.
+- DXF upload with the same 25 MB prototype limit.
+- DXF version, drawing units, layer names, model-space entity counts, and drawing extents.
+- Circle and arc geometry, TEXT/MTEXT annotations, and DIMENSION measurements.
+- Separate Streamlit tabs for 3D STEP/STP and 2D DXF analysis.
 - Synthetic STEP tests generated at runtime, so no CAD test files are committed.
+- Synthetic DXF tests generated at runtime, including geometry, annotations, and a linear dimension.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-DXF reading and 2D/3D comparison are deliberately outside this milestone.
+2D drawing interpretation and 2D/3D feature matching are deliberately outside this milestone.
 
 ## Repository layout
 
@@ -52,6 +57,7 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - `pytest -q` reports all project tests passing.
 - Streamlit starts at `http://localhost:8501` inside the container and the Codespaces forwarded-port page displays **CAD AI Checker**.
 - Uploading a valid small STEP/STP part displays its topology, dimensions, physical properties, and detected basic geometry.
+- Uploading a valid small DXF drawing displays its layers, entity counts, extents, circles, arcs, dimensions, and text.
 
 ## If setup fails
 
