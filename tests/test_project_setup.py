@@ -8,4 +8,4 @@ def test_app_status_describes_milestone_one() -> None:
 
     assert status["application"] == APP_NAME
     assert status["stage"] == APP_STAGE
-    assert status["next_capability"] == "STEP/STP model reading"
+    assert status["capability"] == "STEP/STP topology and geometry analysis"
