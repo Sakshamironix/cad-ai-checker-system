@@ -1,4 +1,4 @@
-"""Milestone 5 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 6 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -6,13 +6,19 @@ from typing import Final
 
 import streamlit as st
 
+from app.comparison_rules import (
+    FAIL,
+    PASS,
+    EngineeringJudgement,
+    evaluate_matching_result,
+)
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.feature_matcher import FeatureMatchingResult, match_features
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 5 — Basic 2D-to-3D feature matching"
+APP_STAGE: Final = "Milestone 6 — Comparison rules and prototype judgement"
 
 
 def get_app_status() -> dict[str, str]:
@@ -20,7 +26,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "Basic DXF requirement to STEP feature matching",
+        "capability": "Traceable PASS, FAIL, or REVIEW engineering judgement",
     }
 
 
@@ -343,6 +349,53 @@ def _render_feature_matches(result: FeatureMatchingResult) -> None:
         st.json(result.to_dict())
 
 
+def _render_engineering_judgement(judgement: EngineeringJudgement) -> None:
+    """Render the final rule-based prototype engineering judgement."""
+    if judgement.decision == PASS:
+        st.success(f"Prototype judgement: {judgement.decision}")
+    elif judgement.decision == FAIL:
+        st.error(f"Prototype judgement: {judgement.decision}")
+    else:
+        st.warning(f"Prototype judgement: {judgement.decision}")
+    st.write(judgement.decision_reason)
+
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("Passed rules", judgement.pass_count)
+    summary_columns[1].metric("Failed rules", judgement.fail_count)
+    summary_columns[2].metric("Review items", judgement.review_count)
+    summary_columns[3].metric(
+        "Decisive pass rate",
+        (
+            f"{judgement.pass_rate_percent:.1f}%"
+            if judgement.pass_rate_percent is not None
+            else "N/A"
+        ),
+    )
+
+    st.dataframe(
+        [
+            {
+                "Rule": finding.rule_id,
+                "Outcome": finding.outcome,
+                "Title": finding.title,
+                "Match": finding.match_index,
+                "DXF entity": finding.source_entity,
+                "Requirement": finding.requirement,
+                "Message": finding.message,
+            }
+            for finding in judgement.findings
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    for warning in judgement.warnings:
+        st.warning(warning)
+
+    with st.expander("Complete engineering judgement data"):
+        st.json(judgement.to_dict())
+
+
 def _render_step_uploader() -> None:
     """Render the independent STEP/STP upload workflow."""
     st.write(
@@ -435,10 +488,13 @@ def _render_matching_uploader() -> None:
             requirements = interpret_dxf_analysis(dxf_analysis)
             step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
             matching_result = match_features(requirements, step_analysis)
+            judgement = evaluate_matching_result(matching_result)
     except (DxfReaderError, StepReaderError, ValueError) as exc:
         st.error(str(exc))
         return
 
+    _render_engineering_judgement(judgement)
+    st.subheader("Feature matching evidence")
     _render_feature_matches(matching_result)
 
 
@@ -451,8 +507,8 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 5 performs basic size and hole matching. Full pass/fail rules are added "
-        "in Milestone 6."
+        "Milestone 6 applies traceable rules and produces a prototype PASS, FAIL, or REVIEW "
+        "judgement."
     )
 
     step_tab, dxf_tab, matching_tab = st.tabs(
