@@ -2,17 +2,20 @@
 
 A browser-first prototype for checking whether a 2D DXF engineering drawing agrees with a 3D STEP/STP CAD model. Development runs entirely in GitHub Codespaces.
 
-## Milestone 1 status
+## Milestone status
 
-The repository foundation is complete:
+Milestone 1 established the repository foundation. Milestone 2 adds a working STEP/STP reader:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
-- A minimal Streamlit application.
-- A pytest smoke test.
+- STEP/STP upload with a 25 MB prototype limit.
+- Solid, shell, face, edge, and vertex counts.
+- X/Y/Z bounding-box dimensions, volume, surface area, and center of mass.
+- Planar face, cylindrical face, circular edge, outer-boundary, and likely-hole detection.
+- Synthetic STEP tests generated at runtime, so no CAD test files are committed.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-STEP/STP upload and geometry extraction are deliberately not included yet; they are Milestone 2 work.
+DXF reading and 2D/3D comparison are deliberately outside this milestone.
 
 ## Repository layout
 
@@ -44,11 +47,11 @@ streamlit run app/main.py
 
 Codespaces forwards port `8501`. Open the forwarded port in the browser when prompted.
 
-## Expected Milestone 1 result
+## Expected result
 
-- `pytest -q` reports `1 passed`.
+- `pytest -q` reports all project tests passing.
 - Streamlit starts at `http://localhost:8501` inside the container and the Codespaces forwarded-port page displays **CAD AI Checker**.
-- The page states that STEP/STP model reading is the next capability.
+- Uploading a valid small STEP/STP part displays its topology, dimensions, physical properties, and detected basic geometry.
 
 ## If setup fails
 
