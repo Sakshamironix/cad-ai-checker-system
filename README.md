@@ -4,7 +4,7 @@ A browser-first prototype for checking whether a 2D DXF engineering drawing agre
 
 ## Milestone status
 
-Milestones 1–5 established the repository foundation, CAD readers, DXF interpretation, and basic feature matching. Milestone 6 adds comparison rules and final prototype judgement:
+Milestones 1–6 established the repository foundation, CAD readers, DXF interpretation, feature matching, and deterministic judgement. Milestone 7 adds the first trial-ready operator dashboard:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
 - STEP/STP upload with a 25 MB prototype limit.
@@ -38,12 +38,17 @@ Milestones 1–5 established the repository foundation, CAD readers, DXF interpr
 - Passed, failed, review, decisive-count, and decisive-pass-rate summaries.
 - Explicit policy settings for missing features, unmatched 3D features, confidence, unsupported requirements, and minimum comparisons.
 - A permanent warning that prototype judgement is not production release approval.
+- A guided upload → tolerance → run → result workflow for the first operator trial.
+- A configurable fallback tolerance used only when no drawing tolerance is available.
+- A comparison table showing nominal values, allowed limits, 3D values, differences, and the amount outside a violated limit.
+- Result filtering for PASS, FAIL, and REVIEW rows.
+- Collapsible supporting STEP, DXF, and raw matching evidence.
 - Synthetic STEP tests generated at runtime, so no CAD test files are committed.
 - Synthetic DXF tests generated at runtime, including geometry, annotations, and a linear dimension.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-Advanced visual evidence and linked 2D/3D highlighting are deliberately outside this milestone and begin in Milestone 8. A basic dashboard is already available for the first trial.
+Advanced visual evidence and linked 2D/3D highlighting are deliberately outside this milestone and begin in Milestone 8. The Milestone 7 dashboard is ready for the first controlled trial.
 
 ## Repository layout
 
@@ -82,8 +87,8 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - Uploading a valid small STEP/STP part displays its topology, dimensions, physical properties, and detected basic geometry.
 - Uploading a valid small DXF drawing displays its layers, entity counts, extents, circles, arcs, dimensions, and text.
 - The DXF dashboard also displays interpreted requirements, calculated limits, tolerance sources, drawing notes, and circle-based hole candidates.
-- The matching dashboard accepts both files and displays basic size and hole matches with status, difference, tolerance, confidence, and reason.
-- The same dashboard now displays the overall prototype judgement and every rule finding before the supporting feature-match evidence.
+- The **Run CAD Check** dashboard accepts both files, waits for an explicit operator command, and displays the overall result before supporting evidence.
+- Every comparison row displays its allowed range, 3D value, difference, outside-limit amount, confidence, and traceable reason.
 
 ## Milestone 5 limitations
 
@@ -105,6 +110,17 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 | No comparable evidence | REVIEW |
 
 The overall decision uses `FAIL` before `REVIEW` before `PASS`. This is intentionally conservative and remains a prototype engineering aid.
+
+## Milestone 7 first-trial procedure
+
+1. Open the Codespace and run `streamlit run app/main.py`.
+2. Open forwarded port `8501` and select **Run CAD Check**.
+3. Upload one small model-space DXF drawing and its corresponding single-solid STEP/STP model.
+4. Confirm the fallback tolerance. Keep `0.100 mm` for the first trial unless the drawing or trial plan requires another value.
+5. Select **Run CAD Check**.
+6. Review the overall `PASS`, `FAIL`, or `REVIEW` result and then inspect every comparison row.
+
+For the first trial, use millimetre files and a simple part with overall linear sizes and cylindrical holes. A `PASS` remains a prototype result and is not production release approval.
 
 ## If setup fails
 
