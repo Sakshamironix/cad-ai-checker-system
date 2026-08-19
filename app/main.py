@@ -1,4 +1,4 @@
-"""Milestone 2 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 3 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ from typing import Final
 
 import streamlit as st
 
+from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 2 — STEP/STP reader"
+APP_STAGE: Final = "Milestone 3 — STEP/STP and DXF readers"
 
 
 def get_app_status() -> dict[str, str]:
@@ -17,7 +18,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "STEP/STP topology and geometry analysis",
+        "capability": "Independent STEP/STP and DXF engineering analysis",
     }
 
 
@@ -95,28 +96,134 @@ def _render_step_results(analysis: StepAnalysis) -> None:
         st.json(analysis.to_dict())
 
 
-def render_app() -> None:
-    """Render the STEP/STP upload and analysis interface."""
-    status = get_app_status()
-    st.set_page_config(page_title=status["application"], page_icon="📐", layout="wide")
+def _render_dxf_results(analysis: DxfAnalysis) -> None:
+    """Render DXF analysis results in a compact engineering layout."""
+    st.success(f"Successfully analyzed {analysis.source_name}")
 
-    st.title(status["application"])
-    st.caption(status["stage"])
-    st.write(
-        "Upload a small STEP or STP model to inspect its topology, dimensions, physical "
-        "properties, and basic geometry. Uploaded files are processed temporarily and are "
-        "not committed to GitHub."
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("DXF version", analysis.dxf_version)
+    summary_columns[1].metric("Units", analysis.units_name)
+    summary_columns[2].metric("Layers", len(analysis.layers))
+    summary_columns[3].metric("Entities", analysis.entity_counts.total)
+
+    st.subheader("Drawing extents")
+    if analysis.extents is None:
+        st.warning("No measurable model-space extents were found.")
+    else:
+        extent_columns = st.columns(4)
+        extent_columns[0].metric("Width", f"{analysis.extents.width:.6g}")
+        extent_columns[1].metric("Height", f"{analysis.extents.height:.6g}")
+        extent_columns[2].metric(
+            "Minimum",
+            f"({analysis.extents.minimum.x:.4g}, {analysis.extents.minimum.y:.4g})",
+        )
+        extent_columns[3].metric(
+            "Maximum",
+            f"({analysis.extents.maximum.x:.4g}, {analysis.extents.maximum.y:.4g})",
+        )
+
+    st.subheader("Model-space entities")
+    st.dataframe(
+        [
+            {"Entity type": entity_type, "Count": count}
+            for entity_type, count in analysis.entity_types.items()
+        ],
+        hide_index=True,
+        use_container_width=True,
     )
 
+    if analysis.circles:
+        st.subheader("Circles")
+        st.dataframe(
+            [
+                {
+                    "Entity": circle.entity_index,
+                    "Layer": circle.layer,
+                    "Center X": circle.center.x,
+                    "Center Y": circle.center.y,
+                    "Radius": circle.radius,
+                    "Diameter": circle.diameter,
+                }
+                for circle in analysis.circles
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    if analysis.arcs:
+        st.subheader("Arcs")
+        st.dataframe(
+            [
+                {
+                    "Entity": arc.entity_index,
+                    "Layer": arc.layer,
+                    "Center X": arc.center.x,
+                    "Center Y": arc.center.y,
+                    "Radius": arc.radius,
+                    "Start angle": arc.start_angle,
+                    "End angle": arc.end_angle,
+                }
+                for arc in analysis.arcs
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    if analysis.dimensions:
+        st.subheader("Dimensions")
+        st.dataframe(
+            [
+                {
+                    "Entity": dimension.entity_index,
+                    "Layer": dimension.layer,
+                    "Type": dimension.dimension_type,
+                    "Measurement": dimension.measurement,
+                    "Text override": dimension.text_override,
+                    "Style": dimension.style,
+                }
+                for dimension in analysis.dimensions
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    if analysis.texts:
+        st.subheader("Drawing text")
+        st.dataframe(
+            [
+                {
+                    "Entity": annotation.entity_index,
+                    "Type": annotation.entity_type,
+                    "Layer": annotation.layer,
+                    "Content": annotation.content,
+                }
+                for annotation in analysis.texts
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    st.caption(f"Drawing layers: {', '.join(analysis.layers)}")
+    with st.expander("Complete DXF analysis data"):
+        st.json(analysis.to_dict())
+
+
+def _render_step_uploader() -> None:
+    """Render the independent STEP/STP upload workflow."""
+    st.write(
+        "Upload a small STEP or STP model to inspect its topology, dimensions, physical "
+        "properties, and basic geometry."
+    )
     uploaded_file = st.file_uploader(
         "STEP/STP model",
         type=["step", "stp"],
         accept_multiple_files=False,
         help="Prototype limit: 25 MB. Start with a small single part.",
+        key="step_upload",
     )
 
     if uploaded_file is None:
-        st.info("Select a STEP or STP file to begin analysis.")
+        st.info("Select a STEP or STP file to begin 3D analysis.")
         return
 
     try:
@@ -127,6 +234,53 @@ def render_app() -> None:
         return
 
     _render_step_results(analysis)
+
+
+def _render_dxf_uploader() -> None:
+    """Render the independent DXF upload workflow."""
+    st.write(
+        "Upload a small DXF drawing to inspect layers, model-space geometry, drawing "
+        "extents, dimensions, and text annotations."
+    )
+    uploaded_file = st.file_uploader(
+        "DXF drawing",
+        type=["dxf"],
+        accept_multiple_files=False,
+        help="Prototype limit: 25 MB. Use a model-space engineering drawing.",
+        key="dxf_upload",
+    )
+
+    if uploaded_file is None:
+        st.info("Select a DXF file to begin 2D analysis.")
+        return
+
+    try:
+        with st.spinner("Reading DXF entities with ezdxf..."):
+            analysis = analyze_dxf_bytes(uploaded_file.getvalue(), uploaded_file.name)
+    except DxfReaderError as exc:
+        st.error(str(exc))
+        return
+
+    _render_dxf_results(analysis)
+
+
+def render_app() -> None:
+    """Render independent STEP/STP and DXF analysis interfaces."""
+    status = get_app_status()
+    st.set_page_config(page_title=status["application"], page_icon="📐", layout="wide")
+
+    st.title(status["application"])
+    st.caption(status["stage"])
+    st.write(
+        "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
+        "Milestone 3 reads each format independently; comparison begins in a later milestone."
+    )
+
+    step_tab, dxf_tab = st.tabs(["3D STEP/STP", "2D DXF"])
+    with step_tab:
+        _render_step_uploader()
+    with dxf_tab:
+        _render_dxf_uploader()
 
 
 if __name__ == "__main__":
