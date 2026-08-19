@@ -4,7 +4,7 @@ A browser-first prototype for checking whether a 2D DXF engineering drawing agre
 
 ## Milestone status
 
-Milestones 1–3 established the repository foundation and independent STEP/STP and DXF readers. Milestone 4 interprets raw DXF entities as basic engineering requirements:
+Milestones 1–4 established the repository foundation, CAD readers, and DXF requirement interpretation. Milestone 5 adds basic 2D-to-3D feature matching:
 
 - GitHub Codespaces development container with Python 3.11, CadQuery/OpenCASCADE, NumPy, Streamlit, ezdxf, and pytest.
 - STEP/STP upload with a 25 MB prototype limit.
@@ -22,12 +22,20 @@ Milestones 1–3 established the repository foundation and independent STEP/STP 
 - Diameter, radius, angle, ordinate, and linear dimension classification.
 - Circle-based hole candidates with center coordinates and diameter.
 - Clear warnings for unitless drawings, unresolved dimensions, missing tolerances, missing extents, and missing hole candidates.
+- Paired DXF and STEP/STP upload in a dedicated matching dashboard tab.
+- Unit conversion to millimetres for millimetres, centimetres, metres, inches, and feet.
+- Low-confidence matching of DXF drawing extents to unique STEP bounding-box axes.
+- Linear-dimension matching to unique STEP bounding-box axes.
+- Diameter and radius matching to likely cylindrical STEP holes.
+- Circle-candidate matching to likely STEP holes by diameter.
+- Explicit matched, out-of-tolerance, missing-candidate, unsupported, and unmatched-3D statuses.
+- Traceable differences, applied deviations, tolerance sources, confidence, and matching reasons.
 - Synthetic STEP tests generated at runtime, so no CAD test files are committed.
 - Synthetic DXF tests generated at runtime, including geometry, annotations, and a linear dimension.
 - GitHub Actions continuous integration.
 - Git ignore rules that prevent CAD uploads and common proprietary formats being committed.
 
-2D-to-3D feature matching is deliberately outside this milestone and begins in Milestone 5.
+Full pass/fail comparison rules and final engineering judgement are deliberately outside this milestone and begin in Milestone 6.
 
 ## Repository layout
 
@@ -66,6 +74,14 @@ Codespaces forwards port `8501`. Open the forwarded port in the browser when pro
 - Uploading a valid small STEP/STP part displays its topology, dimensions, physical properties, and detected basic geometry.
 - Uploading a valid small DXF drawing displays its layers, entity counts, extents, circles, arcs, dimensions, and text.
 - The DXF dashboard also displays interpreted requirements, calculated limits, tolerance sources, drawing notes, and circle-based hole candidates.
+- The matching dashboard accepts both files and displays basic size and hole matches with status, difference, tolerance, confidence, and reason.
+
+## Milestone 5 limitations
+
+- Hole matching uses diameter or radius only because STEP hole centers and axes are not yet retained.
+- Drawing extents can include annotation geometry and therefore remain low-confidence matching inputs.
+- Linear dimensions are matched only against overall STEP bounding-box axes in this milestone.
+- Angular, ordinate, GD&T, datum, thread, surface-finish, and positional requirements remain unresolved.
 
 ## If setup fails
 
