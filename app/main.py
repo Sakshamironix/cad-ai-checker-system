@@ -1,4 +1,4 @@
-"""Milestone 3 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 4 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ from typing import Final
 
 import streamlit as st
 
+from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 3 — STEP/STP and DXF readers"
+APP_STAGE: Final = "Milestone 4 — DXF engineering requirement interpretation"
 
 
 def get_app_status() -> dict[str, str]:
@@ -18,7 +19,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "Independent STEP/STP and DXF engineering analysis",
+        "capability": "DXF dimensions, tolerances, notes, and hole requirement interpretation",
     }
 
 
@@ -96,7 +97,96 @@ def _render_step_results(analysis: StepAnalysis) -> None:
         st.json(analysis.to_dict())
 
 
-def _render_dxf_results(analysis: DxfAnalysis) -> None:
+def _render_interpreted_requirements(requirements: DrawingRequirements) -> None:
+    """Render structured engineering requirements derived from DXF entities."""
+    st.subheader("Interpreted engineering requirements")
+    requirement_columns = st.columns(4)
+    requirement_columns[0].metric("Dimensions", len(requirements.dimensions))
+    requirement_columns[1].metric(
+        "Resolved dimensions", requirements.resolved_dimension_count
+    )
+    requirement_columns[2].metric("With tolerance", requirements.tolerance_count)
+    requirement_columns[3].metric("Hole candidates", len(requirements.hole_candidates))
+
+    if requirements.general_tolerance is not None:
+        st.info(
+            "General tolerance detected: "
+            f"{requirements.general_tolerance.lower_deviation:+g} / "
+            f"{requirements.general_tolerance.upper_deviation:+g}"
+        )
+
+    if requirements.drawing_size is not None:
+        st.caption(
+            "Geometry-derived drawing size: "
+            f"{requirements.drawing_size.width:.6g} × "
+            f"{requirements.drawing_size.height:.6g} "
+            f"{requirements.drawing_size.unit}. This is not treated as a dimensioned tolerance."
+        )
+
+    if requirements.dimensions:
+        st.markdown("#### Normalized dimensions")
+        st.dataframe(
+            [
+                {
+                    "Entity": dimension.entity_index,
+                    "Class": dimension.classification,
+                    "Type": dimension.dimension_type,
+                    "Nominal": dimension.nominal_value,
+                    "Lower deviation": (
+                        dimension.tolerance.lower_deviation
+                        if dimension.tolerance is not None
+                        else None
+                    ),
+                    "Upper deviation": (
+                        dimension.tolerance.upper_deviation
+                        if dimension.tolerance is not None
+                        else None
+                    ),
+                    "Minimum": dimension.minimum_value,
+                    "Maximum": dimension.maximum_value,
+                    "Tolerance source": dimension.tolerance_source,
+                    "Unit": dimension.unit,
+                    "Layer": dimension.layer,
+                }
+                for dimension in requirements.dimensions
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    if requirements.hole_candidates:
+        st.markdown("#### Circle-based hole candidates")
+        st.dataframe(
+            [
+                {
+                    "Entity": hole.entity_index,
+                    "Layer": hole.layer,
+                    "Center X": hole.center.x,
+                    "Center Y": hole.center.y,
+                    "Diameter": hole.diameter,
+                    "Unit": hole.unit,
+                }
+                for hole in requirements.hole_candidates
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.caption(
+            "Circles are candidates only. Milestone 5 will determine whether they match "
+            "actual cylindrical features in the STEP model."
+        )
+
+    for warning in requirements.warnings:
+        st.warning(warning)
+
+    with st.expander("Complete interpreted requirement data"):
+        st.json(requirements.to_dict())
+
+
+def _render_dxf_results(
+    analysis: DxfAnalysis,
+    requirements: DrawingRequirements,
+) -> None:
     """Render DXF analysis results in a compact engineering layout."""
     st.success(f"Successfully analyzed {analysis.source_name}")
 
@@ -207,6 +297,8 @@ def _render_dxf_results(analysis: DxfAnalysis) -> None:
     with st.expander("Complete DXF analysis data"):
         st.json(analysis.to_dict())
 
+    _render_interpreted_requirements(requirements)
+
 
 def _render_step_uploader() -> None:
     """Render the independent STEP/STP upload workflow."""
@@ -257,11 +349,12 @@ def _render_dxf_uploader() -> None:
     try:
         with st.spinner("Reading DXF entities with ezdxf..."):
             analysis = analyze_dxf_bytes(uploaded_file.getvalue(), uploaded_file.name)
+            requirements = interpret_dxf_analysis(analysis)
     except DxfReaderError as exc:
         st.error(str(exc))
         return
 
-    _render_dxf_results(analysis)
+    _render_dxf_results(analysis, requirements)
 
 
 def render_app() -> None:
@@ -273,7 +366,7 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 3 reads each format independently; comparison begins in a later milestone."
+        "Milestone 4 interprets DXF requirements; 2D-to-3D matching begins in Milestone 5."
     )
 
     step_tab, dxf_tab = st.tabs(["3D STEP/STP", "2D DXF"])
