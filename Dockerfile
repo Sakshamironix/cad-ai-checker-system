@@ -4,6 +4,10 @@ FROM mcr.microsoft.com/devcontainers/miniconda:1-3
 
 ARG CONDA_ENV=cad-ai-checker
 
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY environment.yml /tmp/environment.yml
 
 RUN conda env create --file /tmp/environment.yml \
