@@ -1,4 +1,4 @@
-"""Milestone 4 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 5 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ import streamlit as st
 
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
+from app.feature_matcher import FeatureMatchingResult, match_features
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 4 — DXF engineering requirement interpretation"
+APP_STAGE: Final = "Milestone 5 — Basic 2D-to-3D feature matching"
 
 
 def get_app_status() -> dict[str, str]:
@@ -19,7 +20,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "DXF dimensions, tolerances, notes, and hole requirement interpretation",
+        "capability": "Basic DXF requirement to STEP feature matching",
     }
 
 
@@ -172,8 +173,8 @@ def _render_interpreted_requirements(requirements: DrawingRequirements) -> None:
             use_container_width=True,
         )
         st.caption(
-            "Circles are candidates only. Milestone 5 will determine whether they match "
-            "actual cylindrical features in the STEP model."
+            "Circles are candidates only. Use the 2D ↔ 3D Match tab to compare them with "
+            "likely cylindrical features in the STEP model."
         )
 
     for warning in requirements.warnings:
@@ -300,6 +301,48 @@ def _render_dxf_results(
     _render_interpreted_requirements(requirements)
 
 
+def _render_feature_matches(result: FeatureMatchingResult) -> None:
+    """Render basic 2D-to-3D feature-matching results."""
+    st.success(f"Compared {result.drawing_source} with {result.model_source}")
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("Comparisons", len(result.matches))
+    summary_columns[1].metric("Matched", result.matched_count)
+    summary_columns[2].metric("Issues", result.issue_count)
+    summary_columns[3].metric("Unresolved", result.unresolved_count)
+
+    if result.matches:
+        st.dataframe(
+            [
+                {
+                    "Status": match.status,
+                    "2D source": match.source_kind,
+                    "Entity": match.source_entity,
+                    "Requirement": match.requirement,
+                    "Drawing value (mm)": match.drawing_value_mm,
+                    "3D feature": match.model_feature,
+                    "Model value (mm)": match.model_value_mm,
+                    "Difference (mm)": match.difference_mm,
+                    "Lower deviation (mm)": match.lower_deviation_mm,
+                    "Upper deviation (mm)": match.upper_deviation_mm,
+                    "Tolerance source": match.tolerance_source,
+                    "Confidence": match.confidence,
+                    "Reason": match.reason,
+                }
+                for match in result.matches
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.warning("No comparable features were produced.")
+
+    for warning in result.warnings:
+        st.warning(warning)
+
+    with st.expander("Complete feature-matching data"):
+        st.json(result.to_dict())
+
+
 def _render_step_uploader() -> None:
     """Render the independent STEP/STP upload workflow."""
     st.write(
@@ -357,6 +400,48 @@ def _render_dxf_uploader() -> None:
     _render_dxf_results(analysis, requirements)
 
 
+def _render_matching_uploader() -> None:
+    """Render the paired DXF/STEP upload and basic matching workflow."""
+    st.write(
+        "Upload one interpreted DXF drawing and one STEP/STP model. The prototype matches "
+        "overall size, linear dimensions, diameter/radius requirements, and circle-based "
+        "hole candidates."
+    )
+    upload_columns = st.columns(2)
+    with upload_columns[0]:
+        dxf_file = st.file_uploader(
+            "2D DXF drawing",
+            type=["dxf"],
+            accept_multiple_files=False,
+            key="matching_dxf_upload",
+            help="Prototype limit: 25 MB.",
+        )
+    with upload_columns[1]:
+        step_file = st.file_uploader(
+            "3D STEP/STP model",
+            type=["step", "stp"],
+            accept_multiple_files=False,
+            key="matching_step_upload",
+            help="Prototype limit: 25 MB.",
+        )
+
+    if dxf_file is None or step_file is None:
+        st.info("Select both files to begin basic 2D-to-3D feature matching.")
+        return
+
+    try:
+        with st.spinner("Reading both CAD files and matching available features..."):
+            dxf_analysis = analyze_dxf_bytes(dxf_file.getvalue(), dxf_file.name)
+            requirements = interpret_dxf_analysis(dxf_analysis)
+            step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
+            matching_result = match_features(requirements, step_analysis)
+    except (DxfReaderError, StepReaderError, ValueError) as exc:
+        st.error(str(exc))
+        return
+
+    _render_feature_matches(matching_result)
+
+
 def render_app() -> None:
     """Render independent STEP/STP and DXF analysis interfaces."""
     status = get_app_status()
@@ -366,14 +451,19 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 4 interprets DXF requirements; 2D-to-3D matching begins in Milestone 5."
+        "Milestone 5 performs basic size and hole matching. Full pass/fail rules are added "
+        "in Milestone 6."
     )
 
-    step_tab, dxf_tab = st.tabs(["3D STEP/STP", "2D DXF"])
+    step_tab, dxf_tab, matching_tab = st.tabs(
+        ["3D STEP/STP", "2D DXF", "2D ↔ 3D Match"]
+    )
     with step_tab:
         _render_step_uploader()
     with dxf_tab:
         _render_dxf_uploader()
+    with matching_tab:
+        _render_matching_uploader()
 
 
 if __name__ == "__main__":
