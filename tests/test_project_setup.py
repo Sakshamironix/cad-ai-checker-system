@@ -3,9 +3,11 @@
 from app.main import APP_NAME, APP_STAGE, get_app_status
 
 
-def test_app_status_describes_milestone_three() -> None:
+def test_app_status_describes_milestone_four() -> None:
     status = get_app_status()
 
     assert status["application"] == APP_NAME
     assert status["stage"] == APP_STAGE
-    assert status["capability"] == "Independent STEP/STP and DXF engineering analysis"
+    assert status["capability"] == (
+        "DXF dimensions, tolerances, notes, and hole requirement interpretation"
+    )
