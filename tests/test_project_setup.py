@@ -10,6 +10,6 @@ def test_app_status_describes_milestone_twelve() -> None:
     assert status["stage"] == APP_STAGE
     assert "マイルストーン12" in status["stage"]
     assert status["capability"] == (
-        "Guarded bilingual discrepancy explanations after deterministic OK/NG / "
-        "決定論的OK/NG判定後の保護された日英不一致説明"
+        "Guarded bilingual discrepancy explanations after deterministic OK or NG\n"
+        "決定論的OK・NG判定後の保護された日英不一致説明"
     )
