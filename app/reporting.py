@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from html import escape
 from io import BytesIO
 import json
-from typing import Callable, Final, Sequence
+from typing import Final, Sequence
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -61,6 +61,7 @@ class FinalReport:
     dimension_summary: tuple[dict[str, object], ...]
     profile_summary: tuple[dict[str, object], ...]
     ng_findings: tuple[dict[str, object], ...]
+    ai_assistance: dict[str, object] | None
     detailed_dimension_evidence: tuple[dict[str, object], ...]
     detailed_profile_evidence: tuple[dict[str, object], ...]
     visual_evidence: dict[str, object] | None
@@ -92,6 +93,7 @@ class FinalReport:
             "dimension_summary": list(self.dimension_summary),
             "profile_summary": list(self.profile_summary),
             "ng_findings": list(self.ng_findings),
+            "ai_assistance": self.ai_assistance,
             "detailed_evidence": {
                 "dimensions": list(self.detailed_dimension_evidence),
                 "profiles": list(self.detailed_profile_evidence),
@@ -121,6 +123,7 @@ def build_final_report(
     profile_result: ProfileComparisonResult,
     overlay: OverlayVisualization | None = None,
     *,
+    ai_assistance: dict[str, object] | None = None,
     generated_at_utc: str | None = None,
 ) -> FinalReport:
     """Build one final report from results produced by the same CAD file pair."""
@@ -214,6 +217,11 @@ def build_final_report(
             "General tolerance was not applied; requirements without explicit limits are NG."
         )
 
+    if ai_assistance is not None:
+        assisted_judgement = ai_assistance.get("overall_judgement")
+        if assisted_judgement != overall:
+            raise ValueError("Assisted explanation judgement does not match deterministic judgement")
+
     return FinalReport(
         generated_at_utc=generated_at_utc or _now_utc(),
         overall_judgement=overall,
@@ -229,6 +237,7 @@ def build_final_report(
         dimension_summary=dimension_summary,
         profile_summary=profile_summary,
         ng_findings=dimension_ng + profile_ng,
+        ai_assistance=ai_assistance,
         detailed_dimension_evidence=detailed_dimensions,
         detailed_profile_evidence=detailed_profiles,
         visual_evidence=visual_evidence,
@@ -418,10 +427,36 @@ def _render_pdf(report: FinalReport) -> bytes:
     else:
         story.append(Paragraph("No NG findings.", body_style))
 
+    story.append(Paragraph("5. Assisted explanation", section_style))
+    if report.ai_assistance is None:
+        story.append(Paragraph("No assisted explanation was included.", body_style))
+    else:
+        story.append(
+            Paragraph(
+                escape(str(report.ai_assistance.get("summary_en", "—"))),
+                body_style,
+            )
+        )
+        for finding in report.ai_assistance.get("findings", []):
+            if isinstance(finding, dict):
+                story.append(
+                    Paragraph(
+                        "<b>" + escape(str(finding.get("check", "Finding"))) + "</b>: "
+                        + escape(str(finding.get("explanation_en", "—"))),
+                        body_style,
+                    )
+                )
+        story.append(
+            Paragraph(
+                escape(str(report.ai_assistance.get("safety_notice_en", ""))),
+                body_style,
+            )
+        )
+
     story.extend(
         [
             PageBreak(),
-            Paragraph("5. Detailed dimension evidence", section_style),
+            Paragraph("6. Detailed dimension evidence", section_style),
             _pdf_table(
                 ("#", "Result", "Rule", "Requirement", "3D feature", "Difference", "Details"),
                 tuple(
@@ -439,7 +474,7 @@ def _render_pdf(report: FinalReport) -> bytes:
                 (9 * mm, 15 * mm, 16 * mm, 38 * mm, 35 * mm, 22 * mm, 47 * mm),
                 body_style,
             ),
-            Paragraph("6. Detailed profile evidence", section_style),
+            Paragraph("7. Detailed profile evidence", section_style),
             _pdf_table(
                 ("Result", "Feature", "Drawing", "Model", "Difference", "Limit", "Details"),
                 tuple(
@@ -457,7 +492,7 @@ def _render_pdf(report: FinalReport) -> bytes:
                 (15 * mm, 38 * mm, 20 * mm, 20 * mm, 20 * mm, 18 * mm, 51 * mm),
                 body_style,
             ),
-            Paragraph("7. Warnings and limitations", section_style),
+            Paragraph("8. Warnings and limitations", section_style),
         ]
     )
     for warning in report.warnings:

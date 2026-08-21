@@ -95,6 +95,7 @@ def test_report_sections_follow_required_order() -> None:
         "dimension_summary",
         "profile_summary",
         "ng_findings",
+        "ai_assistance",
         "detailed_evidence",
         "warnings",
         "limitations",
@@ -140,3 +141,41 @@ def test_report_rejects_mismatched_profile_source() -> None:
 
     with pytest.raises(ValueError, match="Profile drawing source"):
         build_final_report(matching, judgement, wrong_profile)
+
+
+def test_report_includes_assistance_without_changing_judgement() -> None:
+    matching = _matching_result()
+    judgement = evaluate_matching_result(matching)
+    assistance = {
+        "source": "test",
+        "overall_judgement": NG,
+        "summary_en": "Evidence explanation.",
+        "summary_ja": "証拠の説明。",
+        "findings": [],
+        "safety_notice_en": "Assistance only.",
+    }
+
+    report = build_final_report(
+        matching,
+        judgement,
+        _profile_result(),
+        ai_assistance=assistance,
+        generated_at_utc="2026-08-21T00:00:00+00:00",
+    )
+
+    assert report.overall_judgement == NG
+    assert report.to_dict()["ai_assistance"] == assistance
+    assert report.to_pdf_bytes().startswith(b"%PDF-")
+
+
+def test_report_rejects_assistance_with_different_judgement() -> None:
+    matching = _matching_result()
+    judgement = evaluate_matching_result(matching)
+
+    with pytest.raises(ValueError, match="does not match deterministic judgement"):
+        build_final_report(
+            matching,
+            judgement,
+            _profile_result(),
+            ai_assistance={"overall_judgement": OK},
+        )

@@ -1,4 +1,4 @@
-"""Milestone 9 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 11 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -7,6 +7,14 @@ from typing import Final
 
 import streamlit as st
 
+from app.ai_assistant import (
+    AIConfigurationError,
+    AIExplanation,
+    AIResponseError,
+    build_deterministic_explanation,
+    generate_openai_explanation,
+    openai_is_configured,
+)
 from app.comparison_rules import (
     NG,
     OK,
@@ -28,7 +36,7 @@ from app.reporting import build_final_report
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 10 — Final report creation / マイルストーン10 — 最終レポート作成"
+APP_STAGE: Final = "Milestone 11 — AI-assisted explanations / マイルストーン11 — AI説明支援"
 
 
 def _bilingual(english: str, japanese: str) -> str:
@@ -42,8 +50,8 @@ def get_app_status() -> dict[str, str]:
         "application": APP_NAME,
         "stage": APP_STAGE,
         "capability": (
-            "Downloadable judgement-first JSON and PDF reports / "
-            "判定優先のJSON・PDFレポートダウンロード"
+            "Guarded bilingual discrepancy explanations after deterministic OK/NG / "
+            "決定論的OK/NG判定後の保護された日英不一致説明"
         ),
     }
 
@@ -411,6 +419,46 @@ def _render_engineering_judgement(judgement: EngineeringJudgement) -> None:
         st.json(judgement.to_dict())
 
 
+def _render_assisted_explanation(explanation: AIExplanation) -> None:
+    """Render bilingual assistance while keeping the source and safety boundary visible."""
+    source_label = explanation.source
+    if explanation.model is not None:
+        source_label = f"{source_label} ({explanation.model})"
+    st.caption(_bilingual(f"Explanation source: {source_label}", f"説明ソース：{source_label}"))
+    st.info(f"{explanation.summary_en}\n\n{explanation.summary_ja}")
+
+    for index, finding in enumerate(explanation.findings, start=1):
+        with st.expander(f"{index}. {finding.category} — {finding.check}", expanded=index == 1):
+            st.write(finding.explanation_en)
+            st.write(finding.explanation_ja)
+            cause_columns = st.columns(2)
+            with cause_columns[0]:
+                st.markdown("**Possible causes / 推定原因**")
+                for english, japanese in zip(
+                    finding.likely_causes_en,
+                    finding.likely_causes_ja,
+                    strict=True,
+                ):
+                    st.markdown(f"- {english}\n  \n  {japanese}")
+            with cause_columns[1]:
+                st.markdown("**Recommended checks / 推奨確認**")
+                for english, japanese in zip(
+                    finding.recommended_checks_en,
+                    finding.recommended_checks_ja,
+                    strict=True,
+                ):
+                    st.markdown(f"- {english}\n  \n  {japanese}")
+
+    if explanation.drawing_notes:
+        with st.expander(_bilingual("Drawing-note interpretation", "図面注記の解釈")):
+            for note in explanation.drawing_notes:
+                st.markdown(f"**{note.note}**")
+                st.write(note.interpretation_en)
+                st.write(note.interpretation_ja)
+
+    st.warning(f"{explanation.safety_notice_en}\n\n{explanation.safety_notice_ja}")
+
+
 def _render_step_uploader() -> None:
     """Render the independent STEP/STP upload workflow."""
     st.write(
@@ -611,6 +659,7 @@ def _render_matching_uploader() -> None:
             "judgement": judgement,
             "profile_result": profile_result,
         }
+        st.session_state.pop("cad_ai_explanation", None)
 
     st.divider()
     st.markdown("#### " + _bilingual("3. Judgement", "3. 判定"))
@@ -707,12 +756,71 @@ def _render_matching_uploader() -> None:
         with step_geometry_tab:
             st.html(overlay.step_svg)
 
-    st.markdown("#### " + _bilingual("6. Final report", "6. 最終レポート"))
+    base_report = build_final_report(
+        matching_result,
+        judgement,
+        profile_result,
+        overlay,
+    )
+    local_explanation = build_deterministic_explanation(base_report, requirements.notes)
+    stored_explanation = st.session_state.get("cad_ai_explanation")
+    if (
+        isinstance(stored_explanation, dict)
+        and stored_explanation.get("signature") == current_signature
+        and isinstance(stored_explanation.get("explanation"), AIExplanation)
+    ):
+        active_explanation = stored_explanation["explanation"]
+    else:
+        active_explanation = local_explanation
+
+    st.markdown("#### " + _bilingual("6. Assisted explanation", "6. 説明支援"))
+    st.caption(
+        _bilingual(
+            "The OK/NG result above is already final for this check. Assistance can only explain it.",
+            "上記のOK/NG結果はこの照合の確定判定です。説明支援は判定を変更できません。",
+        )
+    )
+    if openai_is_configured():
+        st.caption(
+            _bilingual(
+                "Optional OpenAI assistance sends normalized comparison evidence and drawing text only; raw CAD files are not sent.",
+                "任意のOpenAI説明支援では正規化された比較証拠と図面テキストのみを送信し、生のCADファイルは送信しません。",
+            )
+        )
+        if st.button(
+            _bilingual("Generate enhanced explanation", "詳細説明を生成"),
+            use_container_width=True,
+        ):
+            try:
+                with st.spinner(_bilingual("Generating guarded explanation...", "保護された説明を生成しています…")):
+                    active_explanation = generate_openai_explanation(
+                        base_report,
+                        requirements.notes,
+                    )
+            except (AIConfigurationError, AIResponseError, RuntimeError) as exc:
+                st.error(_bilingual(f"Enhanced explanation failed: {exc}", f"詳細説明の生成に失敗しました：{exc}"))
+                active_explanation = local_explanation
+            else:
+                st.session_state["cad_ai_explanation"] = {
+                    "signature": current_signature,
+                    "explanation": active_explanation,
+                }
+    else:
+        st.info(
+            _bilingual(
+                "OpenAI is not configured on the server. The safe local explanation is shown below.",
+                "サーバーにOpenAIが設定されていないため、安全なローカル説明を表示します。",
+            )
+        )
+    _render_assisted_explanation(active_explanation)
+
+    st.markdown("#### " + _bilingual("7. Final report", "7. 最終レポート"))
     final_report = build_final_report(
         matching_result,
         judgement,
         profile_result,
         overlay,
+        ai_assistance=active_explanation.to_dict(),
     )
     report_columns = st.columns(3)
     report_columns[0].metric(
@@ -729,8 +837,8 @@ def _render_matching_uploader() -> None:
     )
     st.caption(
         _bilingual(
-            "Report order: judgement, files, tolerance application, summaries, NG findings, detailed evidence, warnings, and limitations.",
-            "レポート順序：判定、ファイル、普通公差適用、サマリー、NG項目、詳細証拠、警告、制限事項。",
+            "Report order: judgement, files, tolerance application, summaries, NG findings, assisted explanation, detailed evidence, warnings, and limitations.",
+            "レポート順序：判定、ファイル、普通公差適用、サマリー、NG項目、説明支援、詳細証拠、警告、制限事項。",
         )
     )
     report_basename = f"{Path(dxf_file.name).stem}_cad_comparison_report"
@@ -813,13 +921,15 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(_bilingual(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 10 compares dimensions and projected profile geometry with deterministic "
-        "OK/NG rules, shows vector evidence, and creates ordered JSON/PDF reports. Explicit "
+        "Milestone 11 compares dimensions and projected profile geometry with deterministic "
+        "OK/NG rules, shows vector evidence, creates ordered JSON/PDF reports, and explains "
+        "the completed judgement without changing it. Explicit "
         "drawing tolerances take priority. The operator selects whether background "
         "general-tolerance rules apply.",
         "アップロードしたCADファイルは一時処理され、GitHubには保存されません。"
-        "マイルストーン10では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
-        "ベクター証拠と順序化されたJSON/PDFレポートを作成します。図面の明示公差を優先し、"
+        "マイルストーン11では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
+        "ベクター証拠と順序化されたJSON/PDFレポートを作成し、確定判定を変更せずに説明します。"
+        "図面の明示公差を優先し、"
         "バックグラウンド普通公差ルールを適用するか作業者が選択します。",
     ))
 

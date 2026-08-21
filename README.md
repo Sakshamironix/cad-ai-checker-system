@@ -4,7 +4,7 @@ A browser-first engineering prototype that compares a 2D DXF drawing with a 3D S
 
 ## Current milestone
 
-Milestone 10 adds final report creation. The implemented workflow now provides:
+Milestone 11 adds guarded AI-assisted discrepancy explanations. The implemented workflow now provides:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
@@ -18,6 +18,9 @@ Milestone 10 adds final report creation. The implemented workflow now provides:
 - Explicit drawing tolerances taking priority over background general-tolerance rules.
 - Deterministic NG when no explicit limit exists and general tolerance is not applied.
 - Ordered, downloadable JSON and PDF final reports.
+- A bilingual local explanation for every completed check, including possible causes and recommended verification steps.
+- Optional OpenAI-enhanced explanations based only on normalized comparison evidence and drawing text.
+- A hard boundary that prevents the explanation layer from changing deterministic OK/NG or evidence identity.
 
 ## Final report order
 
@@ -27,9 +30,10 @@ Milestone 10 adds final report creation. The implemented workflow now provides:
 4. Dimension summary.
 5. Profile summary.
 6. NG findings.
-7. Detailed dimension and profile evidence.
-8. Visual-overlay evidence metadata.
-9. Warnings and known limitations.
+7. Assisted explanation and its safety notice.
+8. Detailed dimension and profile evidence.
+9. Visual-overlay evidence metadata.
+10. Warnings and known limitations.
 
 The report is a prototype engineering aid and is not production release approval.
 
@@ -48,6 +52,7 @@ cad-ai-checker-system/
 │   ├── profile_comparison.py  # Projected-shape comparison
 │   ├── overlay.py             # SVG comparison overlay
 │   ├── general_tolerances.py  # Background tolerance rule set
+│   ├── ai_assistant.py        # Guarded bilingual discrepancy assistance
 │   └── reporting.py           # JSON/PDF final reports
 ├── tests/                     # Automated synthetic CAD tests
 ├── environment.yml            # Conda CAD environment
@@ -70,8 +75,15 @@ After calculation, the dashboard displays:
 - Overall OK/NG judgement.
 - Dimension and profile summary.
 - Combined vector overlay.
+- Bilingual discrepancy explanation with possible causes and recommended checks.
 - Detailed comparison evidence.
 - JSON and PDF report download buttons.
+
+## Optional OpenAI enhancement
+
+The local deterministic explanation works without credentials. To enable the optional enhanced explanation button, add an encrypted GitHub Codespaces secret named `OPENAI_API_KEY`, then rebuild or restart the Codespace. The OpenAI Python SDK reads this environment variable automatically. An optional `OPENAI_MODEL` environment variable can override the default model.
+
+The optional request contains normalized judgement evidence, summaries, NG findings, drawing text, and known limitations. Raw DXF and STEP/STP file bytes are not sent by this feature. OpenAI API usage is billed separately from a ChatGPT subscription.
 
 ## Expected test output
 
@@ -85,6 +97,7 @@ After calculation, the dashboard displays:
 - Angular dimensions, GD&T, datums, threads, surface finish, and full positional requirements are not complete.
 - The background general-tolerance table is provisional until the approved project rules are supplied.
 - The PDF includes comparison evidence and overlay metadata, but not the rendered SVG graphic itself.
+- AI-generated possible causes are hypotheses and require engineering verification; they never change OK/NG.
 
 ## Diagnose setup errors
 
@@ -93,7 +106,7 @@ Run:
 ```bash
 which python
 /opt/conda/envs/cad-ai-checker/bin/python --version
-/opt/conda/envs/cad-ai-checker/bin/python -c "import cadquery, ezdxf, reportlab, streamlit; print('imports successful')"
+/opt/conda/envs/cad-ai-checker/bin/python -c "import cadquery, ezdxf, openai, reportlab, streamlit; print('imports successful')"
 ```
 
 Expected Python environment:
