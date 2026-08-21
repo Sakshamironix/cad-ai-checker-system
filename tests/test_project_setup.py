@@ -3,9 +3,9 @@
 from app.main import APP_NAME, APP_STAGE, get_app_status
 
 
-def test_app_status_describes_milestone_seven() -> None:
+def test_app_status_describes_milestone_eight() -> None:
     status = get_app_status()
 
     assert status["application"] == APP_NAME
     assert status["stage"] == APP_STAGE
-    assert status["capability"] == "Operator-ready tolerance comparison dashboard"
+    assert status["capability"] == "Deterministic profile and dimension comparison dashboard"

@@ -1,4 +1,4 @@
-"""Milestone 7 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 8 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -7,19 +7,24 @@ from typing import Final
 import streamlit as st
 
 from app.comparison_rules import (
-    FAIL,
-    PASS,
+    NG,
+    OK,
     EngineeringJudgement,
     evaluate_matching_result,
 )
-from app.dashboard import build_dashboard_rows
+from app.dashboard import build_dashboard_rows, build_summary_rows
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.feature_matcher import FeatureMatchingResult, match_features
+from app.profile_comparison import (
+    ProfileComparisonError,
+    ProfileComparisonResult,
+    compare_uploaded_profiles,
+)
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 7 — Trial-ready PASS/FAIL dashboard"
+APP_STAGE: Final = "Milestone 8 — OK/NG shape and dimension comparison"
 
 
 def get_app_status() -> dict[str, str]:
@@ -27,7 +32,7 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "Operator-ready tolerance comparison dashboard",
+        "capability": "Deterministic profile and dimension comparison dashboard",
     }
 
 
@@ -351,25 +356,22 @@ def _render_feature_matches(result: FeatureMatchingResult) -> None:
 
 
 def _render_engineering_judgement(judgement: EngineeringJudgement) -> None:
-    """Render the final rule-based prototype engineering judgement."""
-    if judgement.decision == PASS:
-        st.success(f"Prototype judgement: {judgement.decision}")
-    elif judgement.decision == FAIL:
-        st.error(f"Prototype judgement: {judgement.decision}")
+    """Render the dimension-rule judgement without a third review state."""
+    if judgement.decision == OK:
+        st.success(f"Dimension judgement: {judgement.decision}")
     else:
-        st.warning(f"Prototype judgement: {judgement.decision}")
+        st.error(f"Dimension judgement: {judgement.decision}")
     st.write(judgement.decision_reason)
 
-    summary_columns = st.columns(4)
-    summary_columns[0].metric("Passed rules", judgement.pass_count)
-    summary_columns[1].metric("Failed rules", judgement.fail_count)
-    summary_columns[2].metric("Review items", judgement.review_count)
-    summary_columns[3].metric(
-        "Decisive pass rate",
+    summary_columns = st.columns(3)
+    summary_columns[0].metric("OK checks", judgement.pass_count)
+    summary_columns[1].metric("NG checks", judgement.fail_count)
+    summary_columns[2].metric(
+        "OK rate",
         (
             f"{judgement.pass_rate_percent:.1f}%"
             if judgement.pass_rate_percent is not None
-            else "N/A"
+            else "0.0%"
         ),
     )
 
@@ -455,11 +457,10 @@ def _render_dxf_uploader() -> None:
 
 
 def _render_matching_uploader() -> None:
-    """Render the paired DXF/STEP upload and trial dashboard workflow."""
+    """Render the paired DXF/STEP profile and dimension workflow."""
     st.write(
-        "Upload one interpreted DXF drawing and one STEP/STP model. The prototype matches "
-        "overall size, linear dimensions, diameter/radius requirements, and circle-based "
-        "hole candidates."
+        "Upload one DXF drawing and one STEP/STP model. The checker compares dimensions, "
+        "outer profiles, internal circular profiles, feature counts, and projected shape."
     )
     st.markdown("#### 1. Select the two CAD files")
     upload_columns = st.columns(2)
@@ -480,19 +481,28 @@ def _render_matching_uploader() -> None:
             help="Prototype limit: 25 MB.",
         )
 
-    st.markdown("#### 2. Set the fallback tolerance")
-    default_tolerance_mm = st.number_input(
-        "Default tolerance for requirements without a drawing tolerance (mm)",
-        min_value=0.001,
-        max_value=10.0,
-        value=0.1,
-        step=0.01,
-        format="%.3f",
-        help=(
-            "An explicit DXF tolerance takes priority. This value is used only when the "
-            "drawing provides no usable tolerance."
-        ),
-    )
+    st.markdown("#### 2. Set comparison options")
+    option_columns = st.columns(2)
+    with option_columns[0]:
+        selected_view_label = st.selectbox(
+            "STEP projection",
+            options=["Auto", "Top", "Front", "Right"],
+            index=0,
+            help="Auto selects the projection that best matches the DXF profile.",
+        )
+    with option_columns[1]:
+        default_tolerance_mm = st.number_input(
+            "Comparison tolerance when the drawing has no explicit tolerance (mm)",
+            min_value=0.001,
+            max_value=10.0,
+            value=0.1,
+            step=0.01,
+            format="%.3f",
+            help=(
+                "A drawing tolerance takes priority. Missing tolerance does not create a "
+                "third status; this fallback limit is used for deterministic OK/NG judgement."
+            ),
+        )
 
     ready = dxf_file is not None and step_file is not None
     run_check = st.button(
@@ -512,6 +522,7 @@ def _render_matching_uploader() -> None:
         step_file.name,
         len(step_file.getvalue()),
         float(default_tolerance_mm),
+        selected_view_label,
     )
 
     if not run_check:
@@ -524,6 +535,7 @@ def _render_matching_uploader() -> None:
         step_analysis = stored["step_analysis"]
         matching_result = stored["matching_result"]
         judgement = stored["judgement"]
+        profile_result = stored["profile_result"]
     else:
         try:
             with st.spinner("Reading both CAD files and calculating the comparison..."):
@@ -536,7 +548,15 @@ def _render_matching_uploader() -> None:
                     default_tolerance_mm=float(default_tolerance_mm),
                 )
                 judgement = evaluate_matching_result(matching_result)
-        except (DxfReaderError, StepReaderError, ValueError) as exc:
+                profile_result = compare_uploaded_profiles(
+                    dxf_file.getvalue(),
+                    dxf_file.name,
+                    step_file.getvalue(),
+                    step_file.name,
+                    tolerance_mm=float(default_tolerance_mm),
+                    requested_view=selected_view_label.lower(),
+                )
+        except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
             st.error(str(exc))
             return
 
@@ -547,45 +567,92 @@ def _render_matching_uploader() -> None:
             "step_analysis": step_analysis,
             "matching_result": matching_result,
             "judgement": judgement,
+            "profile_result": profile_result,
         }
 
     st.divider()
-    st.markdown("#### 3. Review the result")
-    file_columns = st.columns(3)
+    st.markdown("#### 3. Judgement")
+    overall_judgement = NG if NG in {judgement.decision, profile_result.judgement} else OK
+    if overall_judgement == OK:
+        st.success("Overall judgement: OK")
+        st.write("The available dimension and projected-profile comparisons agree.")
+    else:
+        st.error("Overall judgement: NG")
+        st.write("One or more dimension or projected-profile comparisons do not agree.")
+
+    file_columns = st.columns(4)
     file_columns[0].metric("2D drawing", judgement.drawing_source)
     file_columns[1].metric("3D model", judgement.model_source)
-    file_columns[2].metric("Fallback tolerance", f"±{default_tolerance_mm:.3f} mm")
-    _render_engineering_judgement(judgement)
+    file_columns[2].metric("STEP view", profile_result.selected_view.title())
+    file_columns[3].metric("Fallback limit", f"±{default_tolerance_mm:.3f} mm")
 
-    dashboard_rows = build_dashboard_rows(matching_result, judgement)
-    selected_outcomes = st.multiselect(
-        "Show outcomes",
-        options=[FAIL, "REVIEW", PASS],
-        default=[FAIL, "REVIEW", PASS],
+    st.markdown("#### 4. Dimension and profile summary")
+    summary_rows = build_summary_rows(matching_result, judgement, profile_result)
+    summary_rows = tuple(
+        sorted(
+            summary_rows,
+            key=lambda row: (row.category != "Dimension", row.judgement != NG, row.check),
+        )
     )
-    visible_rows = [row for row in dashboard_rows if row.outcome in selected_outcomes]
     st.dataframe(
         [
             {
-                "#": row.check_number,
-                "Result": row.outcome,
-                "Check": row.requirement,
-                "Drawing (mm)": row.drawing_value_mm,
-                "Allowed min (mm)": row.allowed_minimum_mm,
-                "Allowed max (mm)": row.allowed_maximum_mm,
-                "3D feature": row.model_feature,
-                "3D value (mm)": row.model_value_mm,
-                "Difference (mm)": row.difference_mm,
-                "Outside limit (mm)": row.outside_limit_by_mm,
-                "Confidence": row.confidence,
-                "DXF entity": row.source_entity,
-                "Reason": row.reason,
+                "Judgement": row.judgement,
+                "Category": row.category,
+                "Check": row.check,
+                "2D drawing": row.drawing_value,
+                "3D model": row.model_value,
+                "Difference": row.difference,
+                "Applicable limit": row.tolerance,
             }
-            for row in visible_rows
+            for row in summary_rows
         ],
         hide_index=True,
         use_container_width=True,
     )
+
+    dashboard_rows = build_dashboard_rows(matching_result, judgement)
+    with st.expander("Detailed comparison evidence"):
+        st.markdown("##### Dimension evidence")
+        st.dataframe(
+            [
+                {
+                    "#": row.check_number,
+                    "Judgement": row.outcome,
+                    "Check": row.requirement,
+                    "Drawing (mm)": row.drawing_value_mm,
+                    "Allowed min (mm)": row.allowed_minimum_mm,
+                    "Allowed max (mm)": row.allowed_maximum_mm,
+                    "3D feature": row.model_feature,
+                    "3D value (mm)": row.model_value_mm,
+                    "Difference (mm)": row.difference_mm,
+                    "Outside limit (mm)": row.outside_limit_by_mm,
+                    "Confidence": row.confidence,
+                    "DXF entity": row.source_entity,
+                    "Details": row.reason,
+                }
+                for row in dashboard_rows
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+        st.markdown("##### Profile evidence")
+        st.dataframe(
+            [
+                {
+                    "Judgement": check.judgement,
+                    "Feature": check.feature,
+                    "2D drawing": check.drawing_value,
+                    "3D model": check.model_value,
+                    "Difference": check.difference,
+                    "Tolerance": check.tolerance,
+                    "Details": check.details,
+                }
+                for check in profile_result.checks
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
 
     with st.expander("Supporting CAD analysis"):
         st.markdown("##### STEP model summary")
@@ -594,6 +661,8 @@ def _render_matching_uploader() -> None:
         _render_dxf_results(dxf_analysis, requirements)
         st.markdown("##### Raw feature-matching evidence")
         _render_feature_matches(matching_result)
+        st.markdown("##### Raw profile-comparison evidence")
+        st.json(profile_result.to_dict())
 
 
 def render_app() -> None:
@@ -605,8 +674,8 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 7 provides a trial-ready dashboard using deterministic geometry and "
-        "tolerance rules."
+        "Milestone 8 compares dimensions and projected profile geometry using deterministic "
+        "OK/NG rules. Missing drawing tolerance uses the selected fallback comparison limit."
     )
 
     step_tab, dxf_tab, matching_tab = st.tabs(

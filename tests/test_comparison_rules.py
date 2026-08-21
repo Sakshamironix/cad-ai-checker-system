@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.comparison_rules import FAIL, PASS, REVIEW, RulePolicy, evaluate_matching_result
+from app.comparison_rules import NG, OK, RulePolicy, evaluate_matching_result
 from app.feature_matcher import (
     MATCHED,
     NO_MODEL_CANDIDATE,
@@ -51,7 +51,7 @@ def _result(*matches: FeatureMatch) -> FeatureMatchingResult:
     )
 
 
-def test_all_medium_confidence_matches_produce_pass() -> None:
+def test_all_supported_matches_produce_ok() -> None:
     judgement = evaluate_matching_result(
         _result(
             _match(MATCHED),
@@ -59,7 +59,7 @@ def test_all_medium_confidence_matches_produce_pass() -> None:
         )
     )
 
-    assert judgement.decision == PASS
+    assert judgement.decision == OK
     assert judgement.release_allowed is True
     assert judgement.pass_count == 2
     assert judgement.fail_count == 0
@@ -67,18 +67,18 @@ def test_all_medium_confidence_matches_produce_pass() -> None:
     assert judgement.pass_rate_percent == pytest.approx(100.0)
 
 
-def test_tolerance_violation_produces_fail() -> None:
+def test_tolerance_violation_produces_ng() -> None:
     judgement = evaluate_matching_result(
         _result(_match(OUT_OF_TOLERANCE, difference=0.5, model_value=10.5))
     )
 
-    assert judgement.decision == FAIL
+    assert judgement.decision == NG
     assert judgement.release_allowed is False
     assert judgement.fail_count == 1
     assert judgement.findings[0].rule_id == "R-002"
 
 
-def test_missing_and_unmatched_features_produce_fail() -> None:
+def test_missing_and_unmatched_features_produce_ng() -> None:
     judgement = evaluate_matching_result(
         _result(
             _match(NO_MODEL_CANDIDATE, difference=None, model_value=None),
@@ -86,12 +86,12 @@ def test_missing_and_unmatched_features_produce_fail() -> None:
         )
     )
 
-    assert judgement.decision == FAIL
+    assert judgement.decision == NG
     assert judgement.fail_count == 2
     assert {finding.rule_id for finding in judgement.findings} == {"R-003", "R-004"}
 
 
-def test_low_confidence_and_unsupported_items_require_review() -> None:
+def test_low_confidence_match_is_ok_but_unsupported_item_is_ng() -> None:
     judgement = evaluate_matching_result(
         _result(
             _match(MATCHED, confidence="low"),
@@ -99,12 +99,14 @@ def test_low_confidence_and_unsupported_items_require_review() -> None:
         )
     )
 
-    assert judgement.decision == REVIEW
-    assert judgement.review_count == 2
+    assert judgement.decision == NG
+    assert judgement.pass_count == 1
+    assert judgement.fail_count == 1
+    assert judgement.review_count == 0
     assert judgement.release_allowed is False
 
 
-def test_failure_has_precedence_over_review() -> None:
+def test_ng_has_precedence_over_ok() -> None:
     judgement = evaluate_matching_result(
         _result(
             _match(UNSUPPORTED, difference=None, model_value=None),
@@ -112,20 +114,20 @@ def test_failure_has_precedence_over_review() -> None:
         )
     )
 
-    assert judgement.decision == FAIL
-    assert judgement.fail_count == 1
-    assert judgement.review_count == 1
+    assert judgement.decision == NG
+    assert judgement.fail_count == 2
+    assert judgement.review_count == 0
 
 
-def test_no_comparisons_requires_review() -> None:
+def test_no_comparisons_produces_ng() -> None:
     judgement = evaluate_matching_result(_result())
 
-    assert judgement.decision == REVIEW
+    assert judgement.decision == NG
     assert judgement.findings[0].rule_id == "R-000"
-    assert judgement.pass_rate_percent is None
+    assert judgement.pass_rate_percent == pytest.approx(0.0)
 
 
-def test_policy_can_downgrade_missing_features_to_review() -> None:
+def test_missing_feature_remains_ng_without_review_state() -> None:
     policy = RulePolicy(
         fail_on_missing_model_candidate=False,
         fail_on_unmatched_3d_feature=False,
@@ -135,9 +137,9 @@ def test_policy_can_downgrade_missing_features_to_review() -> None:
         policy=policy,
     )
 
-    assert judgement.decision == REVIEW
-    assert judgement.fail_count == 0
-    assert judgement.review_count == 1
+    assert judgement.decision == NG
+    assert judgement.fail_count == 1
+    assert judgement.review_count == 0
 
 
 def test_policy_rejects_invalid_minimum_comparisons() -> None:
