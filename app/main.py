@@ -42,39 +42,45 @@ HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
 DASHBOARD_CSS: Final = """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
 :root {
-  --cad-bg: #050a12;
-  --cad-surface: #0b1422;
-  --cad-surface-raised: #101d2e;
-  --cad-border: #1d3952;
-  --cad-border-soft: #16293b;
-  --cad-text: #edf7ff;
-  --cad-muted: #8fa9bd;
-  --cad-cyan: #20c7ff;
-  --cad-blue: #1976f3;
+  --cad-bg: #0b2234;
+  --cad-surface: #102a3e;
+  --cad-surface-raised: #14334a;
+  --cad-border: #31617f;
+  --cad-border-soft: #24475f;
+  --cad-text: #f4f9fd;
+  --cad-muted: #a9c0d1;
+  --cad-cyan: #24d2ff;
+  --cad-blue: #1689f7;
 }
 [data-testid="stAppViewContainer"] { background: var(--cad-bg); color: var(--cad-text); }
-[data-testid="stHeader"] { background: rgba(5, 10, 18, 0.88); border-bottom: 1px solid var(--cad-border-soft); }
+[data-testid="stAppViewContainer"] *, [data-testid="stSidebar"] * {
+  font-family: "Sora", "Noto Sans JP", "Segoe UI", sans-serif !important;
+}
+[data-testid="stHeader"] { background: rgba(11, 34, 52, 0.94); border-bottom: 1px solid var(--cad-border-soft); }
 [data-testid="stToolbar"] { right: 1.25rem; }
-.block-container { max-width: 1260px; padding-top: 2.1rem; padding-bottom: 5rem; }
+.block-container { max-width: 1380px; padding-top: 0.8rem; padding-bottom: 5rem; }
 h1, h2, h3, h4, h5, h6, p, label, [data-testid="stCaptionContainer"] { color: var(--cad-text); }
 [data-testid="stCaptionContainer"], .cad-hero-copy p { color: var(--cad-muted); }
 .cad-hero {
-  position: relative; min-height: 276px; overflow: hidden; display: flex; align-items: center;
-  margin: 0; padding: 1.2rem 0 2.4rem; background: transparent;
+  position: relative; min-height: 326px; overflow: hidden; display: flex; align-items: center;
+  margin: 0 -1rem; padding: 1.8rem 1rem 2.2rem; background: #0c2639;
+  border-bottom: 1px solid var(--cad-border); box-shadow: 0 28px 70px rgba(0, 0, 0, 0.24);
 }
-.cad-hero-copy { position: relative; z-index: 2; width: min(57%, 650px); animation: cad-fade-up 0.75s ease-out both; }
+.cad-hero-copy { position: relative; z-index: 2; width: min(56%, 720px); animation: cad-fade-up 0.75s ease-out both; }
 .cad-hero h1 {
-  margin: 0; color: var(--cad-text); font-size: clamp(2.1rem, 4vw, 3.55rem);
-  line-height: 1; letter-spacing: -0.045em; font-weight: 850;
+  margin: 0; color: var(--cad-text); font-size: clamp(2.45rem, 4vw, 3.7rem);
+  line-height: 1; letter-spacing: -0.045em; font-weight: 800;
+  text-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
 }
 .cad-hero h1 span { color: var(--cad-cyan); }
-.cad-stage { margin: 0.75rem 0 0.45rem; color: var(--cad-cyan) !important; font-size: 0.76rem; font-weight: 700; }
-.cad-hero-jp { margin: 0.55rem 0 0; color: #c6eaff !important; font-size: 0.86rem; font-weight: 650; letter-spacing: 0.02em; }
-.cad-hero-copy > p { max-width: 590px; margin: 0; font-size: 0.82rem; line-height: 1.5; }
+.cad-stage { margin: 1.15rem 0 0.9rem; color: var(--cad-cyan) !important; font-size: 0.84rem; font-weight: 600; line-height: 1.55; letter-spacing: 0.025em; }
+.cad-hero-jp { margin: 0.72rem 0 0; color: #d4e9f7 !important; font-size: 0.91rem; font-weight: 500; letter-spacing: 0.01em; }
+.cad-hero-copy > p { max-width: 680px; margin: 0; font-size: 0.91rem; line-height: 1.62; }
 .cad-hero-image {
-  position: absolute; z-index: 1; top: 50%; right: -1.5%; width: 59%; height: auto;
-  transform: translateY(-50%); opacity: 0.78; filter: saturate(1.08) contrast(1.04);
+  position: absolute; z-index: 1; top: 50%; right: -2.5%; width: 64%; height: auto;
+  transform: translateY(-50%); opacity: 0.96; filter: saturate(1.12) contrast(1.07) brightness(1.08);
   animation: cad-bike-float 7s ease-in-out infinite;
 }
 .cad-badges { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 1.4rem; }
@@ -83,50 +89,54 @@ h1, h2, h3, h4, h5, h6, p, label, [data-testid="stCaptionContainer"] { color: va
   border-radius: 8px; font-size: 0.76rem; font-weight: 700;
 }
 [data-testid="stTabs"] [data-baseweb="tab-list"] {
-  gap: 1.2rem; padding: 0; background: transparent; border-bottom: 1px solid var(--cad-border-soft);
+  gap: 2rem; padding: 0 0.8rem; background: #102b40; border-bottom: 1px solid var(--cad-border);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.18);
 }
 [data-testid="stTabs"] [data-baseweb="tab"] {
-  min-height: 54px; padding: 0.45rem 0.2rem; color: var(--cad-muted);
-  background: transparent; border-radius: 0; font-weight: 700; transition: color 180ms ease, transform 180ms ease;
+  min-height: 58px; padding: 0.45rem 0.4rem; color: var(--cad-muted);
+  background: transparent; border-radius: 0; font-size: 0.92rem; font-weight: 600;
+  letter-spacing: 0.015em; transition: color 180ms ease, transform 180ms ease;
 }
 [data-testid="stTabs"] [data-baseweb="tab"]:hover { color: #ffffff; transform: translateY(-1px); }
 [data-testid="stTabs"] [aria-selected="true"] { color: var(--cad-cyan); }
 [data-testid="stTabs"] [data-baseweb="tab-highlight"] { background: var(--cad-cyan); height: 2px; }
 [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
+[data-testid="stTabs"] [data-baseweb="tab-panel"] { padding-top: 0.35rem; }
 [data-testid="stFileUploader"] {
   padding: 0; background: transparent; border: 0;
 }
 [data-testid="stFileUploaderDropzone"] {
-  min-height: 96px; background: transparent; border: 1px dashed #2f6f94; border-radius: 4px;
+  min-height: 88px; background: #123149; border: 1px dashed #497c9c; border-radius: 10px;
   transition: border-color 180ms ease, transform 180ms ease;
 }
-[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--cad-cyan); transform: translateY(-1px); }
+[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--cad-cyan); transform: translateY(-2px); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2); }
 [data-testid="stFileUploaderDropzoneInstructions"] * { color: #b7cee0 !important; }
 [data-testid="stVerticalBlockBorderWrapper"] {
   background: transparent; border: 0 !important; border-radius: 0;
 }
-[data-testid="stSelectbox"] > div > div, [data-testid="stRadio"] { background: transparent; border-radius: 4px; }
+[data-testid="stSelectbox"] > div > div { background: #133149; border-color: #47718c; border-radius: 8px; }
+[data-testid="stRadio"] { background: transparent; border-radius: 0; }
 button[kind="primary"] {
-  min-height: 54px; background: var(--cad-blue); border: 1px solid #4398ff; border-radius: 12px;
-  box-shadow: 0 12px 28px rgba(25, 118, 243, 0.25); font-size: 0.98rem; font-weight: 800; letter-spacing: 0.02em;
+  min-height: 58px; background: var(--cad-blue); border: 1px solid #55b5ff; border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(22, 137, 247, 0.28); font-size: 1.03rem; font-weight: 700; letter-spacing: 0.025em;
 }
-button[kind="primary"]:hover { background: #2b86f8; }
+button[kind="primary"]:hover { background: #2d9aff; transform: translateY(-2px); box-shadow: 0 18px 38px rgba(22, 137, 247, 0.34); }
 button[kind="secondary"] {
   color: #e8f6ff; background: #0f2b45; border: 1px solid #2c668b; border-radius: 9px;
 }
 button[kind="secondary"] p { color: #e8f6ff !important; }
 button[kind="secondary"]:hover { color: #ffffff; background: #16436a; border-color: #42a8e4; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--cad-cyan) !important; }
-[data-testid="stAlert"] { border-radius: 13px; border: 1px solid var(--cad-border); }
+[data-testid="stAlert"] { background: #113149; border-radius: 8px; border: 1px solid #347093; }
 [data-testid="stMetric"] { padding: 0.75rem 0; background: transparent; border-bottom: 1px solid var(--cad-border-soft); border-radius: 0; }
 [data-testid="stDataFrame"] { overflow: hidden; border: 1px solid var(--cad-border-soft); border-radius: 4px; }
-.cad-section-heading { margin: 2.6rem 0 1rem; padding-left: 0.9rem; border-left: 2px solid var(--cad-cyan); animation: cad-fade-up 0.55s ease-out both; }
-.cad-section-heading span { display: block; color: var(--cad-text); font-size: 1.08rem; font-weight: 760; letter-spacing: 0.01em; }
-.cad-section-heading small { display: block; margin-top: 0.18rem; color: var(--cad-muted); font-size: 0.78rem; font-weight: 620; }
-.cad-field-heading { margin: 0.2rem 0 0.65rem; }
+.cad-section-heading { margin: 1.5rem 0 0.7rem; padding-left: 1rem; border-left: 3px solid var(--cad-cyan); animation: cad-fade-up 0.55s ease-out both; }
+.cad-section-heading span { display: block; color: var(--cad-text); font-size: 1.24rem; font-weight: 650; letter-spacing: 0.012em; }
+.cad-section-heading small { display: block; margin-top: 0.22rem; color: #8ec5e4; font-size: 0.82rem; font-weight: 500; }
+.cad-field-heading { margin: 0.1rem 0 0.45rem; }
 .cad-field-heading strong, .cad-field-heading span { display: block; }
-.cad-field-heading strong { color: var(--cad-text); font-size: 0.84rem; letter-spacing: 0.11em; }
-.cad-field-heading span { margin-top: 0.16rem; color: var(--cad-muted); font-size: 0.75rem; }
+.cad-field-heading strong { color: var(--cad-text); font-size: 0.92rem; font-weight: 600; letter-spacing: 0.075em; }
+.cad-field-heading span { margin-top: 0.18rem; color: #8ec5e4; font-size: 0.78rem; }
 [data-testid="stWidgetLabel"] p, [data-baseweb="tab"] p, button p,
 [data-testid="stCaptionContainer"] p, [data-testid="stMarkdownContainer"] p,
 [data-testid="stMetricLabel"] p { white-space: pre-line; }
@@ -138,12 +148,13 @@ hr { border-color: var(--cad-border-soft); }
 }
 @media (max-width: 820px) {
   .block-container { padding: 1rem 0.85rem 3rem; }
-  .cad-hero { min-height: 420px; padding: 1.2rem 0 1.4rem; align-items: flex-start; }
+  .cad-hero { min-height: 480px; margin: 0 -0.85rem; padding: 1.4rem 0.85rem; align-items: flex-start; }
   .cad-hero-copy { width: 100%; }
-  .cad-hero-image { top: auto; right: -10%; bottom: -1.2rem; width: 104%; transform: none; opacity: 0.44; animation: cad-bike-float-mobile 7s ease-in-out infinite; }
+  .cad-hero-image { top: auto; right: -15%; bottom: -1.4rem; width: 112%; transform: none; opacity: 0.52; animation: cad-bike-float-mobile 7s ease-in-out infinite; }
   .cad-hero h1 { font-size: clamp(2.35rem, 13vw, 3.4rem); }
   .cad-hero-copy > p:last-of-type { max-width: 95%; }
-  [data-testid="stTabs"] [data-baseweb="tab"] { padding: 0.45rem 0.55rem; font-size: 0.78rem; }
+  [data-testid="stTabs"] [data-baseweb="tab-list"] { gap: 0.8rem; overflow-x: auto; }
+  [data-testid="stTabs"] [data-baseweb="tab"] { padding: 0.45rem 0.35rem; font-size: 0.78rem; }
 }
 @keyframes cad-bike-float-mobile { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
 </style>
