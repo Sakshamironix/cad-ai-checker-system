@@ -3,13 +3,13 @@
 from app.main import APP_NAME, APP_STAGE, get_app_status
 
 
-def test_app_status_describes_milestone_nine() -> None:
+def test_app_status_describes_milestone_ten() -> None:
     status = get_app_status()
 
     assert status["application"] == APP_NAME
     assert status["stage"] == APP_STAGE
-    assert "マイルストーン9" in status["stage"]
+    assert "マイルストーン10" in status["stage"]
     assert status["capability"] == (
-        "Deterministic comparison with vector mismatch overlay / "
-        "ベクター不一致表示付きの決定論的比較"
+        "Downloadable judgement-first JSON and PDF reports / "
+        "判定優先のJSON・PDFレポートダウンロード"
     )

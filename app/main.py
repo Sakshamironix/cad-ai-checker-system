@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Final
 
 import streamlit as st
@@ -23,10 +24,11 @@ from app.profile_comparison import (
     ProfileComparisonResult,
     compare_uploaded_profiles,
 )
+from app.reporting import build_final_report
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 9 — Vector overlay visualization / マイルストーン9 — ベクター重ね合わせ表示"
+APP_STAGE: Final = "Milestone 10 — Final report creation / マイルストーン10 — 最終レポート作成"
 
 
 def _bilingual(english: str, japanese: str) -> str:
@@ -40,8 +42,8 @@ def get_app_status() -> dict[str, str]:
         "application": APP_NAME,
         "stage": APP_STAGE,
         "capability": (
-            "Deterministic comparison with vector mismatch overlay / "
-            "ベクター不一致表示付きの決定論的比較"
+            "Downloadable judgement-first JSON and PDF reports / "
+            "判定優先のJSON・PDFレポートダウンロード"
         ),
     }
 
@@ -657,6 +659,7 @@ def _render_matching_uploader() -> None:
     )
 
     st.markdown("#### " + _bilingual("5. Visual comparison", "5. 形状の可視比較"))
+    overlay = None
     try:
         overlay = build_overlay_visualization(
             profile_result,
@@ -703,6 +706,49 @@ def _render_matching_uploader() -> None:
             st.html(overlay.dxf_svg)
         with step_geometry_tab:
             st.html(overlay.step_svg)
+
+    st.markdown("#### " + _bilingual("6. Final report", "6. 最終レポート"))
+    final_report = build_final_report(
+        matching_result,
+        judgement,
+        profile_result,
+        overlay,
+    )
+    report_columns = st.columns(3)
+    report_columns[0].metric(
+        _bilingual("Final judgement", "最終判定"),
+        final_report.judgement_label,
+    )
+    report_columns[1].metric(
+        _bilingual("Dimension checks", "寸法確認数"),
+        len(final_report.dimension_summary),
+    )
+    report_columns[2].metric(
+        _bilingual("Profile checks", "輪郭確認数"),
+        len(final_report.profile_summary),
+    )
+    st.caption(
+        _bilingual(
+            "Report order: judgement, files, tolerance application, summaries, NG findings, detailed evidence, warnings, and limitations.",
+            "レポート順序：判定、ファイル、普通公差適用、サマリー、NG項目、詳細証拠、警告、制限事項。",
+        )
+    )
+    report_basename = f"{Path(dxf_file.name).stem}_cad_comparison_report"
+    download_columns = st.columns(2)
+    download_columns[0].download_button(
+        _bilingual("Download JSON report", "JSONレポートをダウンロード"),
+        data=final_report.to_json_bytes(),
+        file_name=f"{report_basename}.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    download_columns[1].download_button(
+        _bilingual("Download PDF report", "PDFレポートをダウンロード"),
+        data=final_report.to_pdf_bytes(),
+        file_name=f"{report_basename}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
     dashboard_rows = build_dashboard_rows(matching_result, judgement)
     with st.expander("Detailed comparison evidence"):
@@ -767,13 +813,14 @@ def render_app() -> None:
     st.caption(status["stage"])
     st.write(_bilingual(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 9 compares dimensions and projected profile geometry with deterministic "
-        "OK/NG rules and shows vector evidence. Explicit drawing tolerances take priority. "
-        "The operator selects whether the background general-tolerance rules apply.",
+        "Milestone 10 compares dimensions and projected profile geometry with deterministic "
+        "OK/NG rules, shows vector evidence, and creates ordered JSON/PDF reports. Explicit "
+        "drawing tolerances take priority. The operator selects whether background "
+        "general-tolerance rules apply.",
         "アップロードしたCADファイルは一時処理され、GitHubには保存されません。"
-        "マイルストーン9では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
-        "ベクター証拠を表示します。図面の明示公差を優先し、バックグラウンド普通公差ルールを"
-        "適用するか作業者が選択します。",
+        "マイルストーン10では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
+        "ベクター証拠と順序化されたJSON/PDFレポートを作成します。図面の明示公差を優先し、"
+        "バックグラウンド普通公差ルールを適用するか作業者が選択します。",
     ))
 
     step_tab, dxf_tab, matching_tab = st.tabs(
