@@ -3,12 +3,12 @@
 from app.main import APP_NAME, APP_STAGE, get_app_status
 
 
-def test_app_status_describes_milestone_eleven() -> None:
+def test_app_status_describes_milestone_twelve() -> None:
     status = get_app_status()
 
     assert status["application"] == APP_NAME
     assert status["stage"] == APP_STAGE
-    assert "マイルストーン11" in status["stage"]
+    assert "マイルストーン12" in status["stage"]
     assert status["capability"] == (
         "Guarded bilingual discrepancy explanations after deterministic OK/NG / "
         "決定論的OK/NG判定後の保護された日英不一致説明"

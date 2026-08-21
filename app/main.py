@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Final
 
@@ -36,7 +37,143 @@ from app.reporting import build_final_report
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 11 — AI-assisted explanations / マイルストーン11 — AI説明支援"
+APP_STAGE: Final = "Milestone 12 — Visual dashboard / マイルストーン12 — ビジュアルダッシュボード"
+HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
+
+DASHBOARD_CSS: Final = """
+<style>
+:root {
+  --cad-bg: #050a12;
+  --cad-surface: #0b1422;
+  --cad-surface-raised: #101d2e;
+  --cad-border: #1d3952;
+  --cad-border-soft: #16293b;
+  --cad-text: #edf7ff;
+  --cad-muted: #8fa9bd;
+  --cad-cyan: #20c7ff;
+  --cad-blue: #1976f3;
+}
+[data-testid="stAppViewContainer"] { background: var(--cad-bg); color: var(--cad-text); }
+[data-testid="stHeader"] { background: rgba(5, 10, 18, 0.88); border-bottom: 1px solid var(--cad-border-soft); }
+[data-testid="stToolbar"] { right: 1.25rem; }
+.block-container { max-width: 1260px; padding-top: 2.1rem; padding-bottom: 5rem; }
+h1, h2, h3, h4, h5, h6, p, label, [data-testid="stCaptionContainer"] { color: var(--cad-text); }
+[data-testid="stCaptionContainer"], .cad-hero-copy p { color: var(--cad-muted); }
+.cad-hero {
+  position: relative; min-height: 276px; overflow: hidden; display: flex; align-items: center;
+  margin: 0 0 1.15rem; padding: 2rem 2.5rem; background: #081321;
+  border: 1px solid var(--cad-border); border-radius: 22px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+}
+.cad-hero::after { content: ""; position: absolute; inset: 0; background: rgba(4, 10, 18, 0.17); pointer-events: none; }
+.cad-hero-copy { position: relative; z-index: 2; width: min(57%, 650px); }
+.cad-brand {
+  display: inline-flex; align-items: center; margin-bottom: 1.25rem; padding: 0.42rem 0.72rem;
+  color: var(--cad-cyan); background: #0a1a2b; border: 1px solid #1d4d6a; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 750; letter-spacing: 0.17em;
+}
+.cad-hero h1 {
+  margin: 0; color: var(--cad-text); font-size: clamp(2.1rem, 4vw, 3.55rem);
+  line-height: 1; letter-spacing: -0.045em; font-weight: 850;
+}
+.cad-hero h1 span { color: var(--cad-cyan); }
+.cad-stage { margin: 0.75rem 0 0.45rem; color: var(--cad-cyan) !important; font-size: 0.76rem; font-weight: 700; }
+.cad-hero-jp { margin: 0.55rem 0 0; color: #c6eaff !important; font-size: 0.86rem; font-weight: 650; letter-spacing: 0.02em; }
+.cad-hero-copy > p { max-width: 590px; margin: 0; font-size: 0.82rem; line-height: 1.5; }
+.cad-hero-image {
+  position: absolute; z-index: 1; top: 50%; right: -1.5%; width: 59%; height: auto;
+  transform: translateY(-50%); opacity: 0.78; filter: saturate(1.08) contrast(1.04);
+}
+.cad-badges { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 1.4rem; }
+.cad-badges span {
+  padding: 0.42rem 0.68rem; color: #bfeeff; background: #0a1a2b; border: 1px solid #17435e;
+  border-radius: 8px; font-size: 0.76rem; font-weight: 700;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+  gap: 0.4rem; padding: 0.35rem; background: var(--cad-surface);
+  border: 1px solid var(--cad-border-soft); border-radius: 14px;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] {
+  min-height: 46px; padding: 0.55rem 1rem; color: var(--cad-muted);
+  background: transparent; border-radius: 10px; font-weight: 700;
+}
+[data-testid="stTabs"] [aria-selected="true"] { color: #ffffff; background: #123556; }
+[data-testid="stTabs"] [data-baseweb="tab-highlight"], [data-testid="stTabs"] [data-baseweb="tab-border"] { display: none; }
+[data-testid="stFileUploader"] {
+  padding: 0.55rem; background: var(--cad-surface-raised); border: 1px solid var(--cad-border); border-radius: 16px;
+}
+[data-testid="stFileUploaderDropzone"] {
+  min-height: 82px; background: #091522; border: 1px dashed #2f6f94; border-radius: 12px;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] * { color: #b7cee0 !important; }
+[data-testid="stVerticalBlockBorderWrapper"] {
+  background: var(--cad-surface); border-color: var(--cad-border) !important; border-radius: 16px;
+}
+[data-testid="stSelectbox"] > div > div, [data-testid="stRadio"] { background: var(--cad-surface); border-radius: 12px; }
+button[kind="primary"] {
+  min-height: 54px; background: var(--cad-blue); border: 1px solid #4398ff; border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(25, 118, 243, 0.25); font-size: 0.98rem; font-weight: 800; letter-spacing: 0.02em;
+}
+button[kind="primary"]:hover { background: #2b86f8; }
+button[kind="secondary"] {
+  color: #e8f6ff; background: #0f2b45; border: 1px solid #2c668b; border-radius: 9px;
+}
+button[kind="secondary"] p { color: #e8f6ff !important; }
+button[kind="secondary"]:hover { color: #ffffff; background: #16436a; border-color: #42a8e4; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--cad-cyan) !important; }
+[data-testid="stAlert"] { border-radius: 13px; border: 1px solid var(--cad-border); }
+[data-testid="stMetric"] { padding: 0.75rem; background: var(--cad-surface); border: 1px solid var(--cad-border-soft); border-radius: 12px; }
+[data-testid="stDataFrame"] { overflow: hidden; border: 1px solid var(--cad-border-soft); border-radius: 14px; }
+hr { border-color: var(--cad-border-soft); }
+@media (max-width: 820px) {
+  .block-container { padding: 1rem 0.85rem 3rem; }
+  .cad-hero { min-height: 420px; padding: 2rem 1.35rem 1.4rem; align-items: flex-start; }
+  .cad-hero-copy { width: 100%; }
+  .cad-hero-image { top: auto; right: -10%; bottom: -1.2rem; width: 104%; transform: none; opacity: 0.44; }
+  .cad-hero h1 { font-size: clamp(2.35rem, 13vw, 3.4rem); }
+  .cad-hero-copy > p:last-of-type { max-width: 95%; }
+  [data-testid="stTabs"] [data-baseweb="tab"] { padding: 0.45rem 0.55rem; font-size: 0.78rem; }
+}
+</style>
+"""
+
+
+def _asset_data_uri(path: Path) -> str:
+    """Return a local PNG as an HTML-safe data URI."""
+    if not path.is_file():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _render_hero() -> None:
+    """Render the selected exploded-superbike visual direction."""
+    bike_uri = _asset_data_uri(HERO_ASSET)
+    image_markup = (
+        f'<img class="cad-hero-image" src="{bike_uri}" '
+        'alt="Exploded CAD visualization of a superbike">'
+        if bike_uri
+        else ""
+    )
+    st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <section class="cad-hero">
+          <div class="cad-hero-copy">
+            <div class="cad-brand">CAD // AI INSPECTION</div>
+            <h1>CAD <span>AI</span> Checker</h1>
+            <p class="cad-stage">● Milestone 12 — Visual dashboard / マイルストーン12 — ビジュアルダッシュボード</p>
+            <p>
+              Compare 2D engineering drawings with 3D CAD models using deterministic
+              dimensional and projected-profile evidence, ordered OK/NG judgement,
+              and bilingual PDF/JSON reports.
+            </p>
+            <p class="cad-hero-jp">2D図面と3Dモデルを、寸法・投影輪郭・OK/NG判定で明確に比較します。</p>
+          </div>
+          {image_markup}
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _bilingual(english: str, japanese: str) -> str:
@@ -518,33 +655,28 @@ def _render_dxf_uploader() -> None:
 
 def _render_matching_uploader() -> None:
     """Render the paired DXF/STEP profile and dimension workflow."""
-    st.write(
-        _bilingual(
-            "Upload one DXF drawing and one STEP/STP model. The checker compares "
-            "dimensions, outer profiles, internal circular profiles, feature counts, "
-            "and projected shape.",
-            "DXF図面1ファイルとSTEP/STPモデル1ファイルをアップロードしてください。"
-            "寸法、外形、内部円形状、フィーチャー数、および投影形状を比較します。",
-        )
-    )
     st.markdown("#### " + _bilingual("1. Select the two CAD files", "1. 2つのCADファイルを選択"))
-    upload_columns = st.columns(2)
+    upload_columns = st.columns(2, gap="large")
     with upload_columns[0]:
-        dxf_file = st.file_uploader(
-            _bilingual("2D DXF drawing", "2D DXF図面"),
-            type=["dxf"],
-            accept_multiple_files=False,
-            key="matching_dxf_upload",
-            help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
-        )
+        with st.container(border=True):
+            st.markdown("**" + _bilingual("2D DRAWING", "2D図面") + "**")
+            dxf_file = st.file_uploader(
+                _bilingual("2D DXF drawing", "2D DXF図面"),
+                type=["dxf"],
+                accept_multiple_files=False,
+                key="matching_dxf_upload",
+                help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
+            )
     with upload_columns[1]:
-        step_file = st.file_uploader(
-            _bilingual("3D STEP/STP model", "3D STEP/STPモデル"),
-            type=["step", "stp"],
-            accept_multiple_files=False,
-            key="matching_step_upload",
-            help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
-        )
+        with st.container(border=True):
+            st.markdown("**" + _bilingual("3D MODEL", "3Dモデル") + "**")
+            step_file = st.file_uploader(
+                _bilingual("3D STEP/STP model", "3D STEP/STPモデル"),
+                type=["step", "stp"],
+                accept_multiple_files=False,
+                key="matching_step_upload",
+                help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
+            )
 
     st.markdown("#### " + _bilingual("2. Set comparison options", "2. 比較条件を設定"))
     option_columns = st.columns(2)
@@ -913,38 +1045,24 @@ def _render_matching_uploader() -> None:
 
 
 def render_app() -> None:
-    """Render independent STEP/STP and DXF analysis interfaces."""
+    """Render the bilingual CAD inspection dashboard."""
     status = get_app_status()
-    st.set_page_config(page_title=status["application"], page_icon="📐", layout="wide")
+    st.set_page_config(page_title=status["application"], layout="wide")
 
-    st.title(status["application"])
-    st.caption(status["stage"])
-    st.write(_bilingual(
-        "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 11 compares dimensions and projected profile geometry with deterministic "
-        "OK/NG rules, shows vector evidence, creates ordered JSON/PDF reports, and explains "
-        "the completed judgement without changing it. Explicit "
-        "drawing tolerances take priority. The operator selects whether background "
-        "general-tolerance rules apply.",
-        "アップロードしたCADファイルは一時処理され、GitHubには保存されません。"
-        "マイルストーン11では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
-        "ベクター証拠と順序化されたJSON/PDFレポートを作成し、確定判定を変更せずに説明します。"
-        "図面の明示公差を優先し、"
-        "バックグラウンド普通公差ルールを適用するか作業者が選択します。",
-    ))
+    _render_hero()
 
-    step_tab, dxf_tab, matching_tab = st.tabs(
+    check_tab, step_tab, dxf_tab = st.tabs(
         [
             _bilingual("Run CAD Check", "CAD照合"),
             _bilingual("Inspect 3D STEP/STP", "3D STEP/STP確認"),
             _bilingual("Inspect 2D DXF", "2D DXF確認"),
         ]
     )
-    with step_tab:
+    with check_tab:
         _render_matching_uploader()
-    with dxf_tab:
+    with step_tab:
         _render_step_uploader()
-    with matching_tab:
+    with dxf_tab:
         _render_dxf_uploader()
 
 
