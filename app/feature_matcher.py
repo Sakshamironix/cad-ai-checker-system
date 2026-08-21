@@ -10,6 +10,10 @@ from app.drawing_interpreter import (
     DrawingRequirements,
     Tolerance,
 )
+from app.general_tolerances import (
+    PROVISIONAL_GENERAL_TOLERANCES,
+    GeneralToleranceSet,
+)
 from app.step_reader import StepAnalysis
 
 DEFAULT_MATCH_TOLERANCE_MM: Final = 0.1
@@ -58,6 +62,7 @@ class FeatureMatchingResult:
     default_tolerance_mm: float
     matches: tuple[FeatureMatch, ...]
     warnings: tuple[str, ...]
+    general_tolerances: GeneralToleranceSet = PROVISIONAL_GENERAL_TOLERANCES
 
     @property
     def matched_count(self) -> int:
@@ -72,7 +77,7 @@ class FeatureMatchingResult:
 
     @property
     def unresolved_count(self) -> int:
-        """Return the number of unsupported comparisons requiring review."""
+        """Return unsupported inputs that deterministically contribute to NG."""
         return sum(match.status == UNSUPPORTED for match in self.matches)
 
     def to_dict(self) -> dict[str, object]:
@@ -87,15 +92,53 @@ class FeatureMatchingResult:
 def _converted_tolerance(
     tolerance: Tolerance | None,
     factor: float,
-    default_tolerance_mm: float,
-) -> tuple[float, float, str]:
+    general_tolerance_mm: float,
+    general_tolerance_applied: bool,
+) -> tuple[float, float, str] | None:
     """Return lower/upper deviations in millimetres and their source label."""
     if tolerance is None:
-        return -default_tolerance_mm, default_tolerance_mm, "prototype default"
+        if not general_tolerance_applied:
+            return None
+        return (
+            -general_tolerance_mm,
+            general_tolerance_mm,
+            "provisional general tolerance set",
+        )
     return (
         tolerance.lower_deviation * factor,
         tolerance.upper_deviation * factor,
         "drawing",
+    )
+
+
+def _missing_tolerance(
+    *,
+    source_kind: str,
+    source_entity: int | None,
+    requirement: str,
+    drawing_value_mm: float,
+    model_feature: str,
+    model_value_mm: float,
+    confidence: str,
+) -> FeatureMatch:
+    """Return a deterministic NG input when no permissible limit is authorized."""
+    return FeatureMatch(
+        source_kind=source_kind,
+        source_entity=source_entity,
+        requirement=requirement,
+        drawing_value_mm=drawing_value_mm,
+        model_feature=model_feature,
+        model_value_mm=model_value_mm,
+        difference_mm=model_value_mm - drawing_value_mm,
+        lower_deviation_mm=None,
+        upper_deviation_mm=None,
+        tolerance_source="not applied",
+        status=UNSUPPORTED,
+        confidence=confidence,
+        reason=(
+            "The drawing has no explicit tolerance and the general-tolerance rule set "
+            "is not applied; no permissible limit is authorized, so the outcome is NG."
+        ),
     )
 
 
@@ -177,7 +220,7 @@ def _match_overall_size(
     requirements: DrawingRequirements,
     step: StepAnalysis,
     factor: float,
-    default_tolerance_mm: float,
+    general_tolerances: GeneralToleranceSet,
 ) -> list[FeatureMatch]:
     """Match geometry-derived 2D width/height to unique 3D bounding-box axes."""
     if requirements.drawing_size is None:
@@ -209,6 +252,19 @@ def _match_overall_size(
             continue
         axis_index, axis_label, axis_value = candidate
         used_axes.add(axis_index)
+        if not general_tolerances.applied:
+            matches.append(
+                _missing_tolerance(
+                    source_kind="drawing extent",
+                    source_entity=None,
+                    requirement=label,
+                    drawing_value_mm=value_mm,
+                    model_feature=axis_label,
+                    model_value_mm=axis_value,
+                    confidence="low",
+                )
+            )
+            continue
         matches.append(
             _comparison(
                 source_kind="drawing extent",
@@ -217,9 +273,9 @@ def _match_overall_size(
                 drawing_value_mm=value_mm,
                 model_feature=axis_label,
                 model_value_mm=axis_value,
-                lower_deviation_mm=-default_tolerance_mm,
-                upper_deviation_mm=default_tolerance_mm,
-                tolerance_source="prototype default",
+                lower_deviation_mm=-general_tolerances.linear_mm,
+                upper_deviation_mm=general_tolerances.linear_mm,
+                tolerance_source="provisional general tolerance set",
                 confidence="low",
                 reason_prefix="Closest unique 3D bounding-box axis",
             )
@@ -231,7 +287,7 @@ def _match_linear_dimensions(
     dimensions: tuple[DimensionRequirement, ...],
     step: StepAnalysis,
     factor: float,
-    default_tolerance_mm: float,
+    general_tolerances: GeneralToleranceSet,
 ) -> list[FeatureMatch]:
     """Match linear dimensions to unique 3D bounding-box axes."""
     axes = [
@@ -271,11 +327,26 @@ def _match_linear_dimensions(
             continue
         axis_index, axis_label, axis_value = candidate
         used_axes.add(axis_index)
-        lower, upper, fallback_source = _converted_tolerance(
+        converted_tolerance = _converted_tolerance(
             dimension.tolerance,
             factor,
-            default_tolerance_mm,
+            general_tolerances.linear_mm,
+            general_tolerances.applied,
         )
+        if converted_tolerance is None:
+            matches.append(
+                _missing_tolerance(
+                    source_kind="dimension",
+                    source_entity=dimension.entity_index,
+                    requirement="Linear dimension",
+                    drawing_value_mm=nominal_mm,
+                    model_feature=axis_label,
+                    model_value_mm=axis_value,
+                    confidence="medium",
+                )
+            )
+            continue
+        lower, upper, fallback_source = converted_tolerance
         matches.append(
             _comparison(
                 source_kind="dimension",
@@ -298,7 +369,7 @@ def _match_cylindrical_dimensions(
     dimensions: tuple[DimensionRequirement, ...],
     step: StepAnalysis,
     factor: float,
-    default_tolerance_mm: float,
+    general_tolerances: GeneralToleranceSet,
     referenced_holes: set[int],
 ) -> list[FeatureMatch]:
     """Match diameter/radius dimensions with likely cylindrical STEP holes."""
@@ -345,11 +416,26 @@ def _match_cylindrical_dimensions(
         hole_index, hole_label, model_value = candidate
         used_for_dimensions.add(hole_index)
         referenced_holes.add(hole_index)
-        lower, upper, fallback_source = _converted_tolerance(
+        converted_tolerance = _converted_tolerance(
             dimension.tolerance,
             factor,
-            default_tolerance_mm,
+            general_tolerances.circular_mm,
+            general_tolerances.applied,
         )
+        if converted_tolerance is None:
+            matches.append(
+                _missing_tolerance(
+                    source_kind="dimension",
+                    source_entity=dimension.entity_index,
+                    requirement=label,
+                    drawing_value_mm=nominal_mm,
+                    model_feature=hole_label,
+                    model_value_mm=model_value,
+                    confidence="medium",
+                )
+            )
+            continue
+        lower, upper, fallback_source = converted_tolerance
         matches.append(
             _comparison(
                 source_kind="dimension",
@@ -372,7 +458,7 @@ def _match_circle_candidates(
     requirements: DrawingRequirements,
     step: StepAnalysis,
     factor: float,
-    default_tolerance_mm: float,
+    general_tolerances: GeneralToleranceSet,
     referenced_holes: set[int],
 ) -> list[FeatureMatch]:
     """Match DXF circles with likely STEP holes using diameter only."""
@@ -400,6 +486,19 @@ def _match_circle_candidates(
         hole_index, hole_label, hole_diameter = candidate
         used_for_circles.add(hole_index)
         referenced_holes.add(hole_index)
+        if not general_tolerances.applied:
+            matches.append(
+                _missing_tolerance(
+                    source_kind="circle candidate",
+                    source_entity=circle.entity_index,
+                    requirement="Circle diameter",
+                    drawing_value_mm=diameter_mm,
+                    model_feature=hole_label,
+                    model_value_mm=hole_diameter,
+                    confidence="medium",
+                )
+            )
+            continue
         matches.append(
             _comparison(
                 source_kind="circle candidate",
@@ -408,9 +507,9 @@ def _match_circle_candidates(
                 drawing_value_mm=diameter_mm,
                 model_feature=hole_label,
                 model_value_mm=hole_diameter,
-                lower_deviation_mm=-default_tolerance_mm,
-                upper_deviation_mm=default_tolerance_mm,
-                tolerance_source="prototype default",
+                lower_deviation_mm=-general_tolerances.circular_mm,
+                upper_deviation_mm=general_tolerances.circular_mm,
+                tolerance_source="provisional general tolerance set",
                 confidence="medium",
                 reason_prefix="Closest likely STEP hole by diameter",
             )
@@ -455,11 +554,22 @@ def _unsupported_dimensions(
 def match_features(
     requirements: DrawingRequirements,
     step: StepAnalysis,
-    default_tolerance_mm: float = DEFAULT_MATCH_TOLERANCE_MM,
+    default_tolerance_mm: float | None = None,
+    *,
+    general_tolerances: GeneralToleranceSet | None = None,
 ) -> FeatureMatchingResult:
     """Match basic 2D requirements with available 3D STEP measurements."""
-    if default_tolerance_mm <= 0:
-        raise ValueError("default_tolerance_mm must be greater than zero")
+    if general_tolerances is not None and default_tolerance_mm is not None:
+        raise ValueError(
+            "Provide general_tolerances or default_tolerance_mm, not both."
+        )
+    if general_tolerances is None:
+        compatibility_limit = (
+            DEFAULT_MATCH_TOLERANCE_MM
+            if default_tolerance_mm is None
+            else default_tolerance_mm
+        )
+        general_tolerances = GeneralToleranceSet.uniform(compatibility_limit)
 
     factor = UNIT_TO_MILLIMETRES.get(requirements.units_name)
     warnings = [
@@ -474,20 +584,21 @@ def match_features(
             drawing_source=requirements.source_name,
             model_source=step.source_name,
             unit_conversion_factor_to_mm=None,
-            default_tolerance_mm=default_tolerance_mm,
+            default_tolerance_mm=general_tolerances.linear_mm,
             matches=(),
             warnings=tuple(warnings),
+            general_tolerances=general_tolerances,
         )
 
     matches: list[FeatureMatch] = []
     referenced_holes: set[int] = set()
-    matches.extend(_match_overall_size(requirements, step, factor, default_tolerance_mm))
+    matches.extend(_match_overall_size(requirements, step, factor, general_tolerances))
     matches.extend(
         _match_linear_dimensions(
             requirements.dimensions,
             step,
             factor,
-            default_tolerance_mm,
+            general_tolerances,
         )
     )
     matches.extend(
@@ -495,7 +606,7 @@ def match_features(
             requirements.dimensions,
             step,
             factor,
-            default_tolerance_mm,
+            general_tolerances,
             referenced_holes,
         )
     )
@@ -504,7 +615,7 @@ def match_features(
             requirements,
             step,
             factor,
-            default_tolerance_mm,
+            general_tolerances,
             referenced_holes,
         )
     )
@@ -535,7 +646,8 @@ def match_features(
         drawing_source=requirements.source_name,
         model_source=step.source_name,
         unit_conversion_factor_to_mm=factor,
-        default_tolerance_mm=default_tolerance_mm,
+        default_tolerance_mm=general_tolerances.linear_mm,
         matches=tuple(matches),
         warnings=tuple(warnings),
+        general_tolerances=general_tolerances,
     )

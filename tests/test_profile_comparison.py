@@ -90,3 +90,23 @@ def test_missing_inner_ring_profile_is_ng(tmp_path: Path) -> None:
     count_check = next(check for check in result.checks if check.feature == "Circular profile count")
     assert result.judgement == NG
     assert count_check.judgement == NG
+
+
+def test_equal_profile_is_ng_without_an_authorized_tolerance(tmp_path: Path) -> None:
+    dxf_path = tmp_path / "ring.dxf"
+    step_path = tmp_path / "ring.step"
+    _write_ring_dxf(dxf_path, outer_diameter=50.0, inner_diameter=30.0)
+    _write_ring_step(step_path)
+
+    result = compare_uploaded_profiles(
+        dxf_path.read_bytes(),
+        dxf_path.name,
+        step_path.read_bytes(),
+        step_path.name,
+        tolerance_mm=None,
+        requested_view="top",
+    )
+
+    assert result.judgement == NG
+    assert any(check.tolerance is None for check in result.checks)
+    assert any("no profile limit is authorized" in check.details for check in result.checks)

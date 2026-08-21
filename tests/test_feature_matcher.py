@@ -16,8 +16,10 @@ from app.feature_matcher import (
     MATCHED,
     OUT_OF_TOLERANCE,
     UNMATCHED_3D,
+    UNSUPPORTED,
     match_features,
 )
+from app.general_tolerances import GeneralToleranceSet
 from app.step_reader import HoleFeature, StepAnalysis, TopologyCounts, Vector3D
 
 
@@ -188,3 +190,106 @@ def test_reject_non_positive_default_tolerance() -> None:
 
     with pytest.raises(ValueError, match="greater than zero"):
         match_features(requirements, _step_analysis(), default_tolerance_mm=0.0)
+
+
+def test_distinct_general_tolerances_are_routed_by_feature_type() -> None:
+    requirements = DrawingRequirements(
+        source_name="general_limits.dxf",
+        units_name="Millimetres",
+        drawing_size=None,
+        general_tolerance=None,
+        dimensions=(
+            DimensionRequirement(
+                entity_index=1,
+                dimension_type="Linear",
+                classification="linear",
+                nominal_value=9.85,
+                tolerance=None,
+                tolerance_source=None,
+                minimum_value=None,
+                maximum_value=None,
+                unit="Millimetres",
+                layer="DIMENSIONS",
+                source_text=None,
+            ),
+            DimensionRequirement(
+                entity_index=2,
+                dimension_type="Diameter",
+                classification="diameter",
+                nominal_value=6.0,
+                tolerance=None,
+                tolerance_source=None,
+                minimum_value=None,
+                maximum_value=None,
+                unit="Millimetres",
+                layer="DIMENSIONS",
+                source_text=None,
+            ),
+        ),
+        hole_candidates=(),
+        notes=(),
+        warnings=(),
+    )
+    tolerances = GeneralToleranceSet(
+        linear_mm=0.2,
+        circular_mm=0.01,
+        profile_mm=0.4,
+        position_mm=0.1,
+    )
+
+    result = match_features(
+        requirements,
+        _step_analysis(),
+        general_tolerances=tolerances,
+    )
+    linear = next(match for match in result.matches if match.requirement == "Linear dimension")
+    diameter = next(match for match in result.matches if match.requirement == "Hole diameter")
+
+    assert linear.status == MATCHED
+    assert linear.upper_deviation_mm == pytest.approx(0.2)
+    assert diameter.status == OUT_OF_TOLERANCE
+    assert diameter.upper_deviation_mm == pytest.approx(0.01)
+    assert result.general_tolerances == tolerances
+    assert linear.tolerance_source == "provisional general tolerance set"
+
+
+def test_missing_explicit_tolerance_is_ng_input_when_general_rules_not_applied() -> None:
+    requirements = DrawingRequirements(
+        source_name="no_general_tolerance.dxf",
+        units_name="Millimetres",
+        drawing_size=None,
+        general_tolerance=None,
+        dimensions=(
+            DimensionRequirement(
+                entity_index=1,
+                dimension_type="Linear",
+                classification="linear",
+                nominal_value=10.0,
+                tolerance=None,
+                tolerance_source=None,
+                minimum_value=None,
+                maximum_value=None,
+                unit="Millimetres",
+                layer="DIMENSIONS",
+                source_text=None,
+            ),
+        ),
+        hole_candidates=(),
+        notes=(),
+        warnings=(),
+    )
+
+    result = match_features(
+        requirements,
+        _step_analysis(),
+        general_tolerances=GeneralToleranceSet.uniform(0.1).with_application(False),
+    )
+    dimension_match = next(
+        match for match in result.matches if match.requirement == "Linear dimension"
+    )
+
+    assert dimension_match.status == UNSUPPORTED
+    assert dimension_match.tolerance_source == "not applied"
+    assert dimension_match.lower_deviation_mm is None
+    assert dimension_match.upper_deviation_mm is None
+    assert "outcome is NG" in dimension_match.reason

@@ -1,4 +1,4 @@
-"""Milestone 8 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 9 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from app.dashboard import build_dashboard_rows, build_summary_rows
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.feature_matcher import FeatureMatchingResult, match_features
+from app.general_tolerances import PROVISIONAL_GENERAL_TOLERANCES
+from app.overlay import OverlayError, build_overlay_visualization
 from app.profile_comparison import (
     ProfileComparisonError,
     ProfileComparisonResult,
@@ -24,7 +26,12 @@ from app.profile_comparison import (
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 8 — OK/NG shape and dimension comparison"
+APP_STAGE: Final = "Milestone 9 — Vector overlay visualization / マイルストーン9 — ベクター重ね合わせ表示"
+
+
+def _bilingual(english: str, japanese: str) -> str:
+    """Return one consistent English/Japanese predefined dashboard label."""
+    return f"{english} / {japanese}"
 
 
 def get_app_status() -> dict[str, str]:
@@ -32,7 +39,10 @@ def get_app_status() -> dict[str, str]:
     return {
         "application": APP_NAME,
         "stage": APP_STAGE,
-        "capability": "Deterministic profile and dimension comparison dashboard",
+        "capability": (
+            "Deterministic comparison with vector mismatch overlay / "
+            "ベクター不一致表示付きの決定論的比較"
+        ),
     }
 
 
@@ -459,61 +469,91 @@ def _render_dxf_uploader() -> None:
 def _render_matching_uploader() -> None:
     """Render the paired DXF/STEP profile and dimension workflow."""
     st.write(
-        "Upload one DXF drawing and one STEP/STP model. The checker compares dimensions, "
-        "outer profiles, internal circular profiles, feature counts, and projected shape."
+        _bilingual(
+            "Upload one DXF drawing and one STEP/STP model. The checker compares "
+            "dimensions, outer profiles, internal circular profiles, feature counts, "
+            "and projected shape.",
+            "DXF図面1ファイルとSTEP/STPモデル1ファイルをアップロードしてください。"
+            "寸法、外形、内部円形状、フィーチャー数、および投影形状を比較します。",
+        )
     )
-    st.markdown("#### 1. Select the two CAD files")
+    st.markdown("#### " + _bilingual("1. Select the two CAD files", "1. 2つのCADファイルを選択"))
     upload_columns = st.columns(2)
     with upload_columns[0]:
         dxf_file = st.file_uploader(
-            "2D DXF drawing",
+            _bilingual("2D DXF drawing", "2D DXF図面"),
             type=["dxf"],
             accept_multiple_files=False,
             key="matching_dxf_upload",
-            help="Prototype limit: 25 MB.",
+            help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
         )
     with upload_columns[1]:
         step_file = st.file_uploader(
-            "3D STEP/STP model",
+            _bilingual("3D STEP/STP model", "3D STEP/STPモデル"),
             type=["step", "stp"],
             accept_multiple_files=False,
             key="matching_step_upload",
-            help="Prototype limit: 25 MB.",
+            help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
         )
 
-    st.markdown("#### 2. Set comparison options")
+    st.markdown("#### " + _bilingual("2. Set comparison options", "2. 比較条件を設定"))
     option_columns = st.columns(2)
+    view_options = {
+        _bilingual("Auto", "自動"): "auto",
+        _bilingual("Top", "上面"): "top",
+        _bilingual("Front", "正面"): "front",
+        _bilingual("Right", "右側面"): "right",
+    }
     with option_columns[0]:
         selected_view_label = st.selectbox(
-            "STEP projection",
-            options=["Auto", "Top", "Front", "Right"],
+            _bilingual("STEP projection", "STEP投影方向"),
+            options=list(view_options),
             index=0,
-            help="Auto selects the projection that best matches the DXF profile.",
-        )
-    with option_columns[1]:
-        default_tolerance_mm = st.number_input(
-            "Comparison tolerance when the drawing has no explicit tolerance (mm)",
-            min_value=0.001,
-            max_value=10.0,
-            value=0.1,
-            step=0.01,
-            format="%.3f",
-            help=(
-                "A drawing tolerance takes priority. Missing tolerance does not create a "
-                "third status; this fallback limit is used for deterministic OK/NG judgement."
+            help=_bilingual(
+                "Auto selects the projection that best matches the DXF profile.",
+                "自動ではDXF外形に最も一致する投影を選択します。",
             ),
         )
+    with option_columns[1]:
+        tolerance_application_label = st.radio(
+            _bilingual("General tolerance", "普通公差"),
+            options=[
+                _bilingual("Applied", "適用あり"),
+                _bilingual("Not applied", "適用なし"),
+            ],
+            horizontal=True,
+            help=_bilingual(
+                "The numerical rule set is controlled in the background. Explicit drawing "
+                "tolerances always take priority.",
+                "数値ルールセットはバックグラウンドで管理されます。図面の明示公差を常に優先します。",
+            ),
+        )
+    general_tolerance_applied = tolerance_application_label == _bilingual(
+        "Applied", "適用あり"
+    )
+    general_tolerances = PROVISIONAL_GENERAL_TOLERANCES.with_application(
+        general_tolerance_applied
+    )
+    profile_tolerance_mm = (
+        general_tolerances.profile_mm if general_tolerances.applied else None
+    )
+    st.caption(
+        _bilingual(
+            "General-tolerance values are maintained in the background rule set and are not operator inputs.",
+            "普通公差値はバックグラウンドのルールセットで管理され、作業者入力ではありません。",
+        )
+    )
 
     ready = dxf_file is not None and step_file is not None
     run_check = st.button(
-        "Run CAD Check",
+        _bilingual("Run CAD Check", "CAD照合を実行"),
         type="primary",
         disabled=not ready,
         use_container_width=True,
     )
 
     if not ready:
-        st.info("Select both files, then press Run CAD Check.")
+        st.info(_bilingual("Select both files, then press Run CAD Check.", "両方のファイルを選択し、CAD照合を実行してください。"))
         return
 
     current_signature = (
@@ -521,14 +561,14 @@ def _render_matching_uploader() -> None:
         len(dxf_file.getvalue()),
         step_file.name,
         len(step_file.getvalue()),
-        float(default_tolerance_mm),
-        selected_view_label,
+        general_tolerances.applied,
+        view_options[selected_view_label],
     )
 
     if not run_check:
         stored = st.session_state.get("cad_check_result")
         if stored is None or stored["signature"] != current_signature:
-            st.info("Files are ready. Press Run CAD Check to calculate the result.")
+            st.info(_bilingual("Files are ready. Press Run CAD Check to calculate the result.", "ファイルの準備ができました。CAD照合を実行してください。"))
             return
         dxf_analysis = stored["dxf_analysis"]
         requirements = stored["requirements"]
@@ -538,14 +578,14 @@ def _render_matching_uploader() -> None:
         profile_result = stored["profile_result"]
     else:
         try:
-            with st.spinner("Reading both CAD files and calculating the comparison..."):
+            with st.spinner(_bilingual("Reading both CAD files and calculating the comparison...", "両方のCADファイルを読み込み、比較を計算しています…")):
                 dxf_analysis = analyze_dxf_bytes(dxf_file.getvalue(), dxf_file.name)
                 requirements = interpret_dxf_analysis(dxf_analysis)
                 step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
                 matching_result = match_features(
                     requirements,
                     step_analysis,
-                    default_tolerance_mm=float(default_tolerance_mm),
+                    general_tolerances=general_tolerances,
                 )
                 judgement = evaluate_matching_result(matching_result)
                 profile_result = compare_uploaded_profiles(
@@ -553,8 +593,8 @@ def _render_matching_uploader() -> None:
                     dxf_file.name,
                     step_file.getvalue(),
                     step_file.name,
-                    tolerance_mm=float(default_tolerance_mm),
-                    requested_view=selected_view_label.lower(),
+                    tolerance_mm=profile_tolerance_mm,
+                    requested_view=view_options[selected_view_label],
                 )
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
             st.error(str(exc))
@@ -571,22 +611,27 @@ def _render_matching_uploader() -> None:
         }
 
     st.divider()
-    st.markdown("#### 3. Judgement")
+    st.markdown("#### " + _bilingual("3. Judgement", "3. 判定"))
     overall_judgement = NG if NG in {judgement.decision, profile_result.judgement} else OK
     if overall_judgement == OK:
-        st.success("Overall judgement: OK")
-        st.write("The available dimension and projected-profile comparisons agree.")
+        st.success(_bilingual("Overall judgement: OK", "総合判定：OK"))
+        st.write(_bilingual("The available dimension and projected-profile comparisons agree.", "確認可能な寸法および投影輪郭の比較は一致しています。"))
     else:
-        st.error("Overall judgement: NG")
-        st.write("One or more dimension or projected-profile comparisons do not agree.")
+        st.error(_bilingual("Overall judgement: NG", "総合判定：NG（不合格）"))
+        st.write(_bilingual("One or more dimension or projected-profile comparisons do not agree.", "寸法または投影輪郭の比較に1件以上の不一致があります。"))
 
     file_columns = st.columns(4)
-    file_columns[0].metric("2D drawing", judgement.drawing_source)
-    file_columns[1].metric("3D model", judgement.model_source)
-    file_columns[2].metric("STEP view", profile_result.selected_view.title())
-    file_columns[3].metric("Fallback limit", f"±{default_tolerance_mm:.3f} mm")
+    file_columns[0].metric(_bilingual("2D drawing", "2D図面"), judgement.drawing_source)
+    file_columns[1].metric(_bilingual("3D model", "3Dモデル"), judgement.model_source)
+    file_columns[2].metric(_bilingual("STEP view", "STEP投影"), profile_result.selected_view.title())
+    file_columns[3].metric(
+        _bilingual("General tolerance", "普通公差"),
+        _bilingual("Applied", "適用あり")
+        if general_tolerances.applied
+        else _bilingual("Not applied", "適用なし"),
+    )
 
-    st.markdown("#### 4. Dimension and profile summary")
+    st.markdown("#### " + _bilingual("4. Dimension and profile summary", "4. 寸法・輪郭サマリー"))
     summary_rows = build_summary_rows(matching_result, judgement, profile_result)
     summary_rows = tuple(
         sorted(
@@ -597,19 +642,67 @@ def _render_matching_uploader() -> None:
     st.dataframe(
         [
             {
-                "Judgement": row.judgement,
-                "Category": row.category,
-                "Check": row.check,
-                "2D drawing": row.drawing_value,
-                "3D model": row.model_value,
-                "Difference": row.difference,
-                "Applicable limit": row.tolerance,
+                _bilingual("Judgement", "判定"): row.judgement,
+                _bilingual("Category", "区分"): row.category,
+                _bilingual("Check", "確認項目"): row.check,
+                _bilingual("2D drawing", "2D図面"): row.drawing_value,
+                _bilingual("3D model", "3Dモデル"): row.model_value,
+                _bilingual("Difference", "差異"): row.difference,
+                _bilingual("Applicable limit", "適用限界"): row.tolerance,
             }
             for row in summary_rows
         ],
         hide_index=True,
         use_container_width=True,
     )
+
+    st.markdown("#### " + _bilingual("5. Visual comparison", "5. 形状の可視比較"))
+    try:
+        overlay = build_overlay_visualization(
+            profile_result,
+            tolerance_mm=profile_tolerance_mm,
+        )
+    except OverlayError as exc:
+        st.warning(_bilingual(f"Vector overlay is unavailable: {exc}", f"ベクター重ね合わせを表示できません：{exc}"))
+    else:
+        if general_tolerances.applied:
+            overlay_columns = st.columns(3)
+            overlay_columns[0].metric(_bilingual("DXF mismatched geometry", "DXF不一致形状"), overlay.dxf_mismatch_count)
+            overlay_columns[1].metric(_bilingual("STEP mismatched geometry", "STEP不一致形状"), overlay.step_mismatch_count)
+            overlay_columns[2].metric(
+                _bilingual("Alignment rotation", "位置合わせ回転"),
+                f"{overlay.alignment_quarter_turns * 90}°",
+            )
+            st.caption(_bilingual(
+                "Blue: DXF geometry · Green: STEP projection · Red dashed: geometry outside "
+                "the applicable background profile rule. Profiles may be rotated in 90° steps.",
+                "青：DXF形状・緑：STEP投影・赤破線：バックグラウンド輪郭ルール外。"
+                "輪郭は90°単位で回転して比較します。",
+            ))
+        else:
+            st.metric(
+                _bilingual("Alignment rotation", "位置合わせ回転"),
+                f"{overlay.alignment_quarter_turns * 90}°",
+            )
+            st.warning(
+                _bilingual(
+                    "General tolerance is not applied. The overlay is shown without red mismatch classification.",
+                    "普通公差は適用されていません。重ね合わせは赤色の不一致判定なしで表示されます。",
+                )
+            )
+        overlay_tab, dxf_geometry_tab, step_geometry_tab = st.tabs(
+            [
+                _bilingual("Combined overlay", "重ね合わせ"),
+                _bilingual("DXF geometry", "DXF形状"),
+                _bilingual("STEP projection", "STEP投影"),
+            ]
+        )
+        with overlay_tab:
+            st.html(overlay.combined_svg)
+        with dxf_geometry_tab:
+            st.html(overlay.dxf_svg)
+        with step_geometry_tab:
+            st.html(overlay.step_svg)
 
     dashboard_rows = build_dashboard_rows(matching_result, judgement)
     with st.expander("Detailed comparison evidence"):
@@ -672,14 +765,23 @@ def render_app() -> None:
 
     st.title(status["application"])
     st.caption(status["stage"])
-    st.write(
+    st.write(_bilingual(
         "Uploaded CAD files are processed temporarily and are not committed to GitHub. "
-        "Milestone 8 compares dimensions and projected profile geometry using deterministic "
-        "OK/NG rules. Missing drawing tolerance uses the selected fallback comparison limit."
-    )
+        "Milestone 9 compares dimensions and projected profile geometry with deterministic "
+        "OK/NG rules and shows vector evidence. Explicit drawing tolerances take priority. "
+        "The operator selects whether the background general-tolerance rules apply.",
+        "アップロードしたCADファイルは一時処理され、GitHubには保存されません。"
+        "マイルストーン9では寸法と投影輪郭を決定論的なOK/NG規則で比較し、"
+        "ベクター証拠を表示します。図面の明示公差を優先し、バックグラウンド普通公差ルールを"
+        "適用するか作業者が選択します。",
+    ))
 
     step_tab, dxf_tab, matching_tab = st.tabs(
-        ["Run CAD Check", "Inspect 3D STEP/STP", "Inspect 2D DXF"]
+        [
+            _bilingual("Run CAD Check", "CAD照合"),
+            _bilingual("Inspect 3D STEP/STP", "3D STEP/STP確認"),
+            _bilingual("Inspect 2D DXF", "2D DXF確認"),
+        ]
     )
     with step_tab:
         _render_matching_uploader()

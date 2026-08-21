@@ -236,9 +236,20 @@ def _check(
     feature: str,
     drawing: float,
     model: float,
-    tolerance: float,
+    tolerance: float | None,
 ) -> ProfileCheck:
     difference = model - drawing
+    if tolerance is None:
+        return ProfileCheck(
+            category,
+            feature,
+            drawing,
+            model,
+            difference,
+            None,
+            NG,
+            "General tolerance is not applied; no profile limit is authorized, so the outcome is NG.",
+        )
     judgement = OK if abs(difference) <= tolerance else NG
     details = (
         f"Difference {difference:+.6g} mm is within the comparison tolerance."
@@ -265,12 +276,12 @@ def _feature_count_check(feature: str, drawing: int, model: int) -> ProfileCheck
 def compare_profile_geometry(
     dxf_primitives: Sequence[ProfilePrimitive],
     projection: StepProjection,
-    tolerance_mm: float,
+    tolerance_mm: float | None,
     drawing_source: str = "drawing.dxf",
     model_source: str = "model.step",
 ) -> ProfileComparisonResult:
     """Compare one DXF profile with one STEP projection."""
-    if tolerance_mm <= 0:
+    if tolerance_mm is not None and tolerance_mm <= 0:
         raise ProfileComparisonError("Comparison tolerance must be greater than zero.")
 
     dxf_points = _all_points(dxf_primitives)
@@ -320,7 +331,9 @@ def compare_profile_geometry(
         )
 
     deviation = _best_profile_deviation(dxf_points, step_points)
-    deviation_judgement = OK if deviation <= tolerance_mm else NG
+    deviation_judgement = (
+        OK if tolerance_mm is not None and deviation <= tolerance_mm else NG
+    )
     checks.append(
         ProfileCheck(
             category="Profile",
@@ -333,7 +346,12 @@ def compare_profile_geometry(
             details=(
                 "Projected profile agrees within the comparison tolerance."
                 if deviation_judgement == OK
-                else f"Projected profile exceeds the comparison tolerance by {deviation - tolerance_mm:.6g} mm."
+                else (
+                    "General tolerance is not applied; no profile limit is authorized, "
+                    "so the outcome is NG."
+                    if tolerance_mm is None
+                    else f"Projected profile exceeds the comparison tolerance by {deviation - tolerance_mm:.6g} mm."
+                )
             ),
         )
     )
@@ -361,7 +379,7 @@ def compare_uploaded_profiles(
     dxf_filename: str,
     step_data: bytes,
     step_filename: str,
-    tolerance_mm: float,
+    tolerance_mm: float | None,
     requested_view: str = "auto",
 ) -> ProfileComparisonResult:
     """Extract, select a projection, and compare uploaded CAD profiles."""
