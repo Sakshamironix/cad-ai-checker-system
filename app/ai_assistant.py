@@ -9,29 +9,27 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 import os
-from typing import Final, Protocol
+from typing import Callable, Final
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.reporting import FinalReport
 
 
-DEFAULT_OPENAI_MODEL: Final = "gpt-5.6"
+DEFAULT_GEMINI_MODEL: Final = "gemini-3.5-flash"
+DEFAULT_GROQ_MODEL: Final = "llama-3.3-70b-versatile"
+HTTP_TIMEOUT_SECONDS: Final = 45
 
 
 class AIConfigurationError(RuntimeError):
-    """Raised when optional OpenAI assistance is requested but unavailable."""
+    """Raised when optional external AI assistance is unavailable."""
 
 
 class AIResponseError(RuntimeError):
     """Raised when an AI response is incomplete or changes evidence identity."""
 
 
-class ResponsesClient(Protocol):
-    """Small protocol used to inject a fake client in unit tests."""
-
-    class Responses(Protocol):
-        def create(self, **kwargs: object) -> object: ...
-
-    responses: Responses
+ProviderCaller = Callable[[str, str, str, dict[str, object]], str]
 
 
 @dataclass(frozen=True)
@@ -207,9 +205,17 @@ def build_deterministic_explanation(
     )
 
 
-def openai_is_configured() -> bool:
-    """Return whether the server has an OpenAI API key in its environment."""
-    return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+def ai_provider_status() -> dict[str, bool]:
+    """Return provider availability without exposing credential values."""
+    return {
+        "gemini": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+        "groq": bool(os.environ.get("GROQ_API_KEY", "").strip()),
+    }
+
+
+def ai_is_configured() -> bool:
+    """Return whether at least one external explanation provider is configured."""
+    return any(ai_provider_status().values())
 
 
 def _response_schema() -> dict[str, object]:
@@ -272,18 +278,112 @@ def _ai_input(report: FinalReport, drawing_notes: tuple[str, ...]) -> str:
     return json.dumps(payload, ensure_ascii=False, allow_nan=False)
 
 
-def _make_openai_client() -> ResponsesClient:
-    if not openai_is_configured():
-        raise AIConfigurationError(
-            "OPENAI_API_KEY is not configured. Local deterministic assistance remains available."
-        )
+def _post_json(url: str, headers: dict[str, str], payload: dict[str, object]) -> dict[str, object]:
+    request = Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
     try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise AIConfigurationError(
-            "The OpenAI Python dependency is not installed in this environment."
-        ) from exc
-    return OpenAI()
+        with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            response_body = response.read().decode("utf-8")
+    except HTTPError as exc:
+        raise AIResponseError(f"provider HTTP request failed with status {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise AIResponseError(f"provider connection failed: {type(exc).__name__}") from exc
+    try:
+        decoded = json.loads(response_body)
+    except json.JSONDecodeError as exc:
+        raise AIResponseError("provider returned invalid response JSON") from exc
+    if not isinstance(decoded, dict):
+        raise AIResponseError("provider response must be a JSON object")
+    return decoded
+
+
+def _gemini_request(
+    api_key: str,
+    model: str,
+    normalized_evidence: str,
+    schema: dict[str, object],
+) -> str:
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent"
+    )
+    response = _post_json(
+        url,
+        {"x-goog-api-key": api_key},
+        {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": _provider_prompt(normalized_evidence)}],
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": schema,
+            },
+        },
+    )
+    try:
+        text = response["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIResponseError("Gemini returned no explanation text") from exc
+    if not isinstance(text, str) or not text.strip():
+        raise AIResponseError("Gemini returned no explanation text")
+    return text
+
+
+def _groq_request(
+    api_key: str,
+    model: str,
+    normalized_evidence: str,
+    schema: dict[str, object],
+) -> str:
+    del schema  # Groq JSON Object Mode is validated locally against our schema rules.
+    response = _post_json(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {"Authorization": f"Bearer {api_key}"},
+        {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": _system_instruction(),
+                },
+                {
+                    "role": "user",
+                    "content": normalized_evidence,
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        },
+    )
+    try:
+        text = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIResponseError("Groq returned no explanation text") from exc
+    if not isinstance(text, str) or not text.strip():
+        raise AIResponseError("Groq returned no explanation text")
+    return text
+
+
+def _system_instruction() -> str:
+    return (
+        "You are an engineering inspection explanation assistant. The supplied OK/NG "
+        "judgement and evidence are immutable. Never create or change a judgement, "
+        "measurement, tolerance, finding identity, or drawing-note text. Explain every "
+        "finding in concise English and Japanese. Possible causes are hypotheses only; "
+        "state practical verification checks. Return only one JSON object matching the "
+        "requested fields."
+    )
+
+
+def _provider_prompt(normalized_evidence: str) -> str:
+    return f"{_system_instruction()}\n\nNormalized evidence:\n{normalized_evidence}"
 
 
 def _required_text(payload: dict[str, object], key: str) -> str:
@@ -307,6 +407,7 @@ def _validated_explanation(
     drawing_notes: tuple[str, ...],
     payload: dict[str, object],
     model: str,
+    source: str,
 ) -> AIExplanation:
     raw_findings = payload.get("findings")
     if not isinstance(raw_findings, list) or len(raw_findings) != len(report.ng_findings):
@@ -358,7 +459,7 @@ def _validated_explanation(
         )
 
     return AIExplanation(
-        source="OpenAI assistance",
+        source=source,
         model=model,
         overall_judgement=report.overall_judgement,
         summary_en=_required_text(payload, "summary_en"),
@@ -368,45 +469,65 @@ def _validated_explanation(
     )
 
 
-def generate_openai_explanation(
+def generate_ai_explanation(
     report: FinalReport,
     drawing_notes: tuple[str, ...] = (),
     *,
-    client: ResponsesClient | None = None,
-    model: str | None = None,
+    gemini_caller: ProviderCaller | None = None,
+    groq_caller: ProviderCaller | None = None,
+    gemini_api_key: str | None = None,
+    groq_api_key: str | None = None,
+    gemini_model: str | None = None,
+    groq_model: str | None = None,
 ) -> AIExplanation:
-    """Ask OpenAI to explain normalized evidence under a strict JSON schema."""
-    active_client = client or _make_openai_client()
-    active_model = (model or os.environ.get("OPENAI_MODEL", "")).strip() or DEFAULT_OPENAI_MODEL
-    try:
-        response = active_client.responses.create(
-            model=active_model,
-            instructions=(
-                "You are an engineering inspection explanation assistant. The supplied OK/NG "
-                "judgement and evidence are immutable. Never create or change a judgement, "
-                "measurement, tolerance, finding identity, or drawing-note text. Explain every "
-                "finding in concise English and Japanese. Possible causes are hypotheses only; "
-                "state practical verification checks. Return only the requested schema."
-            ),
-            input=_ai_input(report, drawing_notes),
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "cad_discrepancy_explanation",
-                    "strict": True,
-                    "schema": _response_schema(),
-                }
-            },
+    """Explain normalized evidence with Gemini first and Groq as fallback."""
+    active_gemini_key = (
+        gemini_api_key if gemini_api_key is not None else os.environ.get("GEMINI_API_KEY", "")
+    ).strip()
+    active_groq_key = (
+        groq_api_key if groq_api_key is not None else os.environ.get("GROQ_API_KEY", "")
+    ).strip()
+    active_gemini_model = (
+        gemini_model or os.environ.get("GEMINI_MODEL", "")
+    ).strip() or DEFAULT_GEMINI_MODEL
+    active_groq_model = (
+        groq_model or os.environ.get("GROQ_MODEL", "")
+    ).strip() or DEFAULT_GROQ_MODEL
+    normalized_evidence = _ai_input(report, drawing_notes)
+    schema = _response_schema()
+    providers: list[tuple[str, str, str, ProviderCaller]] = []
+    if active_gemini_key:
+        providers.append(
+            ("Gemini primary assistance", active_gemini_key, active_gemini_model, gemini_caller or _gemini_request)
         )
-    except Exception as exc:
-        raise AIResponseError(f"OpenAI request failed: {exc}") from exc
-    output_text = getattr(response, "output_text", None)
-    if not isinstance(output_text, str) or not output_text.strip():
-        raise AIResponseError("OpenAI returned no structured explanation text")
-    try:
-        payload = json.loads(output_text)
-    except json.JSONDecodeError as exc:
-        raise AIResponseError("OpenAI returned invalid structured JSON") from exc
-    if not isinstance(payload, dict):
-        raise AIResponseError("OpenAI response must be a JSON object")
-    return _validated_explanation(report, drawing_notes, payload, active_model)
+    if active_groq_key:
+        providers.append(
+            ("Groq fallback assistance", active_groq_key, active_groq_model, groq_caller or _groq_request)
+        )
+    if not providers:
+        raise AIConfigurationError(
+            "Neither GEMINI_API_KEY nor GROQ_API_KEY is configured. "
+            "Local deterministic assistance remains available."
+        )
+
+    failures: list[str] = []
+    for source, api_key, model, caller in providers:
+        provider_name = source.split()[0]
+        try:
+            output_text = caller(api_key, model, normalized_evidence, schema)
+            payload = json.loads(output_text)
+            if not isinstance(payload, dict):
+                raise AIResponseError("response must be a JSON object")
+            return _validated_explanation(
+                report,
+                drawing_notes,
+                payload,
+                model,
+                source,
+            )
+        except json.JSONDecodeError:
+            failures.append(f"{provider_name}: invalid structured JSON")
+        except Exception as exc:
+            failures.append(f"{provider_name}: {exc}")
+
+    raise AIResponseError("All configured AI providers failed. " + " | ".join(failures))

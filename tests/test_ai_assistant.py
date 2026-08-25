@@ -1,8 +1,7 @@
-"""Tests for guarded local and OpenAI-assisted discrepancy explanations."""
+"""Tests for guarded local and dual-provider discrepancy explanations."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 
 import pytest
@@ -10,8 +9,9 @@ import pytest
 from app.ai_assistant import (
     AIConfigurationError,
     AIResponseError,
+    ai_provider_status,
     build_deterministic_explanation,
-    generate_openai_explanation,
+    generate_ai_explanation,
 )
 from app.comparison_rules import NG, evaluate_matching_result
 from app.feature_matcher import OUT_OF_TOLERANCE, FeatureMatch, FeatureMatchingResult
@@ -109,24 +109,31 @@ def _response_payload() -> dict[str, object]:
     }
 
 
-@dataclass
-class _FakeResponse:
-    output_text: str
-
-
-class _FakeResponses:
-    def __init__(self, payload: dict[str, object]) -> None:
+class _FakeCaller:
+    def __init__(self, payload: dict[str, object] | None = None, error: Exception | None = None) -> None:
         self.payload = payload
-        self.kwargs: dict[str, object] = {}
+        self.error = error
+        self.calls: list[dict[str, object]] = []
 
-    def create(self, **kwargs: object) -> _FakeResponse:
-        self.kwargs = kwargs
-        return _FakeResponse(json.dumps(self.payload, ensure_ascii=False))
-
-
-class _FakeClient:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self.responses = _FakeResponses(payload)
+    def __call__(
+        self,
+        api_key: str,
+        model: str,
+        normalized_evidence: str,
+        schema: dict[str, object],
+    ) -> str:
+        self.calls.append(
+            {
+                "api_key": api_key,
+                "model": model,
+                "evidence": normalized_evidence,
+                "schema": schema,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        assert self.payload is not None
+        return json.dumps(self.payload, ensure_ascii=False)
 
 
 def test_local_explanation_preserves_ng_and_evidence() -> None:
@@ -141,42 +148,78 @@ def test_local_explanation_preserves_ng_and_evidence() -> None:
     assert "NG" in explanation.summary_en
 
 
-def test_openai_request_uses_normalized_evidence_and_strict_schema() -> None:
-    client = _FakeClient(_response_payload())
+def test_gemini_primary_uses_normalized_evidence_and_schema() -> None:
+    gemini = _FakeCaller(_response_payload())
+    groq = _FakeCaller(_response_payload())
 
-    explanation = generate_openai_explanation(
+    explanation = generate_ai_explanation(
         _report(),
         ("REMOVE BURRS",),
-        client=client,
-        model="test-model",
+        gemini_caller=gemini,
+        groq_caller=groq,
+        gemini_api_key="gemini-test-key",
+        groq_api_key="groq-test-key",
+        gemini_model="gemini-test-model",
     )
 
     assert explanation.overall_judgement == NG
-    assert explanation.model == "test-model"
-    request = client.responses.kwargs
-    assert request["model"] == "test-model"
-    assert request["text"]["format"]["strict"] is True
-    transmitted = json.loads(request["input"])
+    assert explanation.source == "Gemini primary assistance"
+    assert explanation.model == "gemini-test-model"
+    assert len(gemini.calls) == 1
+    assert groq.calls == []
+    request = gemini.calls[0]
+    assert request["model"] == "gemini-test-model"
+    assert request["schema"]["additionalProperties"] is False
+    transmitted = json.loads(request["evidence"])
     assert transmitted["immutable_judgement"] == NG
     assert transmitted["drawing_notes"] == ["REMOVE BURRS"]
     assert "raw_cad" not in transmitted
 
 
-def test_openai_response_cannot_change_finding_identity() -> None:
+def test_groq_is_used_when_gemini_fails() -> None:
+    gemini = _FakeCaller(error=AIResponseError("temporary Gemini failure"))
+    groq = _FakeCaller(_response_payload())
+
+    explanation = generate_ai_explanation(
+        _report(),
+        ("REMOVE BURRS",),
+        gemini_caller=gemini,
+        groq_caller=groq,
+        gemini_api_key="gemini-test-key",
+        groq_api_key="groq-test-key",
+        groq_model="groq-test-model",
+    )
+
+    assert len(gemini.calls) == 1
+    assert len(groq.calls) == 1
+    assert explanation.source == "Groq fallback assistance"
+    assert explanation.model == "groq-test-model"
+    assert explanation.overall_judgement == NG
+
+
+def test_provider_response_cannot_change_finding_identity() -> None:
     payload = _response_payload()
     payload["findings"][0]["check"] = "Invented feature"
 
-    with pytest.raises(AIResponseError, match="changed deterministic finding identity"):
-        generate_openai_explanation(
+    with pytest.raises(AIResponseError, match="All configured AI providers failed"):
+        generate_ai_explanation(
             _report(),
             ("REMOVE BURRS",),
-            client=_FakeClient(payload),
-            model="test-model",
+            gemini_caller=_FakeCaller(payload),
+            gemini_api_key="gemini-test-key",
         )
 
 
-def test_missing_api_key_has_clear_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_missing_api_keys_have_clear_configuration_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
-    with pytest.raises(AIConfigurationError, match="OPENAI_API_KEY"):
-        generate_openai_explanation(_report())
+    with pytest.raises(AIConfigurationError, match="GEMINI_API_KEY.*GROQ_API_KEY"):
+        generate_ai_explanation(_report())
+
+
+def test_provider_status_never_returns_secret_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "private-gemini-value")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    assert ai_provider_status() == {"gemini": True, "groq": False}

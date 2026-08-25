@@ -4,7 +4,7 @@ A browser-first engineering prototype that compares a 2D DXF drawing with a 3D S
 
 ## Current milestone
 
-Milestone 11 adds guarded AI-assisted discrepancy explanations. The implemented workflow now provides:
+Milestone 12 adds a guarded dual-provider AI trial. The implemented workflow now provides:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
@@ -19,7 +19,7 @@ Milestone 11 adds guarded AI-assisted discrepancy explanations. The implemented 
 - Deterministic NG when no explicit limit exists and general tolerance is not applied.
 - Ordered, downloadable JSON and PDF final reports.
 - A bilingual local explanation for every completed check, including possible causes and recommended verification steps.
-- Optional OpenAI-enhanced explanations based only on normalized comparison evidence and drawing text.
+- Optional Gemini-primary explanations with automatic Groq fallback, based only on normalized comparison evidence and drawing text.
 - A hard boundary that prevents the explanation layer from changing deterministic OK/NG or evidence identity.
 
 ## Final report order
@@ -79,11 +79,11 @@ After calculation, the dashboard displays:
 - Detailed comparison evidence.
 - JSON and PDF report download buttons.
 
-## Optional OpenAI enhancement
+## Optional dual-provider AI enhancement
 
-The local deterministic explanation works without credentials. To enable the optional enhanced explanation button, add an encrypted GitHub Codespaces secret named `OPENAI_API_KEY`, then rebuild or restart the Codespace. The OpenAI Python SDK reads this environment variable automatically. An optional `OPENAI_MODEL` environment variable can override the default model.
+The local deterministic explanation works without credentials. To enable enhanced explanations, add encrypted GitHub Codespaces secrets named `GEMINI_API_KEY` and `GROQ_API_KEY`, then rebuild or restart the Codespace. Gemini is tried first; Groq is used automatically if Gemini fails. Optional `GEMINI_MODEL` and `GROQ_MODEL` environment variables can override the defaults.
 
-The optional request contains normalized judgement evidence, summaries, NG findings, drawing text, and known limitations. Raw DXF and STEP/STP file bytes are not sent by this feature. OpenAI API usage is billed separately from a ChatGPT subscription.
+The optional request contains normalized judgement evidence, summaries, NG findings, drawing text, and known limitations. Raw DXF and STEP/STP file bytes and API keys are never included in the request evidence or reports. Provider API usage may be billed separately.
 
 ## Expected test output
 
@@ -106,7 +106,7 @@ Run:
 ```bash
 which python
 /opt/conda/envs/cad-ai-checker/bin/python --version
-/opt/conda/envs/cad-ai-checker/bin/python -c "import cadquery, ezdxf, openai, reportlab, streamlit; print('imports successful')"
+/opt/conda/envs/cad-ai-checker/bin/python -c "import cadquery, ezdxf, reportlab, streamlit; print('imports successful')"
 ```
 
 Expected Python environment:

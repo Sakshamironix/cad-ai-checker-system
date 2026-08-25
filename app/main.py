@@ -1,4 +1,4 @@
-"""Milestone 11 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 12 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -13,8 +13,9 @@ from app.ai_assistant import (
     AIExplanation,
     AIResponseError,
     build_deterministic_explanation,
-    generate_openai_explanation,
-    openai_is_configured,
+    ai_is_configured,
+    ai_provider_status,
+    generate_ai_explanation,
 )
 from app.comparison_rules import (
     NG,
@@ -37,7 +38,10 @@ from app.reporting import build_final_report
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
-APP_STAGE: Final = "Milestone 12 — Visual dashboard\nマイルストーン12 — ビジュアルダッシュボード"
+APP_STAGE: Final = (
+    "Milestone 12 — Visual dashboard + dual-provider AI\n"
+    "マイルストーン12 — ビジュアルダッシュボード・2系統AI"
+)
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
 DASHBOARD_CSS: Final = """
@@ -184,7 +188,7 @@ def _render_hero() -> None:
         <section class="cad-hero">
           <div class="cad-hero-copy">
             <h1>CAD <span>AI</span> Checker</h1>
-            <p class="cad-stage">● Milestone 12 — Visual dashboard<br>マイルストーン12 — ビジュアルダッシュボード</p>
+            <p class="cad-stage">● Milestone 12 — Visual dashboard + dual-provider AI<br>マイルストーン12 — ビジュアルダッシュボード・2系統AI</p>
             <p>
               Compare 2D engineering drawings with 3D CAD models using deterministic
               dimensional and projected-profile evidence, ordered OK/NG judgement,
@@ -950,11 +954,17 @@ def _render_matching_uploader() -> None:
             "上記のOK/NG結果はこの照合の確定判定です。説明支援は判定を変更できません。",
         )
     )
-    if openai_is_configured():
+    if ai_is_configured():
+        provider_status = ai_provider_status()
+        available_providers = [
+            label
+            for key, label in (("gemini", "Gemini primary"), ("groq", "Groq fallback"))
+            if provider_status[key]
+        ]
         st.caption(
             _bilingual(
-                "Optional OpenAI assistance sends normalized comparison evidence and drawing text only; raw CAD files are not sent.",
-                "任意のOpenAI説明支援では正規化された比較証拠と図面テキストのみを送信し、生のCADファイルは送信しません。",
+                "Configured: " + ", ".join(available_providers) + ". Only normalized evidence and drawing text are sent; raw CAD files are not sent.",
+                "設定済み：" + "、".join(available_providers) + "。正規化された証拠と図面テキストのみを送信し、生のCADファイルは送信しません。",
             )
         )
         if st.button(
@@ -963,7 +973,7 @@ def _render_matching_uploader() -> None:
         ):
             try:
                 with st.spinner(_bilingual("Generating guarded explanation...", "保護された説明を生成しています…")):
-                    active_explanation = generate_openai_explanation(
+                    active_explanation = generate_ai_explanation(
                         base_report,
                         requirements.notes,
                     )
@@ -978,8 +988,8 @@ def _render_matching_uploader() -> None:
     else:
         st.info(
             _bilingual(
-                "OpenAI is not configured on the server. The safe local explanation is shown below.",
-                "サーバーにOpenAIが設定されていないため、安全なローカル説明を表示します。",
+                "Gemini and Groq are not configured on the server. The safe local explanation is shown below.",
+                "サーバーにGeminiとGroqが設定されていないため、安全なローカル説明を表示します。",
             )
         )
     _render_assisted_explanation(active_explanation)
