@@ -1,6 +1,6 @@
 # CAD AI Checker
 
-## Milestone 16 — End-to-end validation and pilot hardening
+## Milestone 17 — Visual CAD inspection evidence
 
 The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
 comparison so geometry from separate drawing views never combines. Unitless DXF values
@@ -10,31 +10,31 @@ standard views and centre-plane candidates for full sections. A view that cannot
 classified or compared produces NG, never REVIEW. AI assistance can explain evidence
 only and cannot change the deterministic OK/NG judgement.
 
-Milestone 16 validates and hardens the completed deterministic workflow for pilot trials.
-It adds configurable runtime limits, controlled bilingual errors, temporary-file cleanup,
-safe diagnostics, report validation, an offline health check, and a restartable container.
-Permanent public hosting remains Milestone 17.
+Milestone 17 adds visual evidence for every deterministic comparison. Each detected DXF
+view now has an isolated DXF panel, the selected STEP projection, and a coloured overlay
+that shows the exact geometry used by the comparison engine. The dashboard applies the
+background general-tolerance rule set automatically; explicit drawing tolerances still take
+priority. Permanent public hosting remains a later deployment milestone.
 
-Permanent hosting is scheduled for Milestone 17; the Codespaces Streamlit URL is only
+Permanent hosting is scheduled for a later deployment milestone; the Codespaces Streamlit URL is only
 available while its Codespace and process are running.
 
 A browser-first engineering prototype that compares a 2D DXF drawing with a 3D STEP/STP model. Development and trials run in GitHub Codespaces through a Streamlit dashboard.
 
 ## Current milestone
 
-Milestone 16 adds pilot validation and hardening. The implemented workflow now provides:
+Milestone 17 includes the completed pilot hardening plus visual CAD inspection evidence:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
 - Deterministic 2D-to-3D dimension and cylindrical-feature matching.
 - Projected outer-profile and internal circular-profile comparison.
 - Deterministic **OK** or **NG (Not Good)** judgement; there is no REVIEW state.
-- Vector DXF/STEP overlay with red mismatch highlighting when an applicable tolerance exists.
+- Per-view DXF/STEP visual evidence, including the isolated DXF view, selected STEP projection, and coloured overlay.
 - English/Japanese predefined dashboard text.
-- A single operator choice for **General tolerance: Applied / Not applied**.
-- Numerical general-tolerance values maintained only in the background rule set.
+- Numerical general-tolerance values maintained and applied automatically from the background rule set.
 - Explicit drawing tolerances taking priority over background general-tolerance rules.
-- Deterministic NG when no explicit limit exists and general tolerance is not applied.
+- Explicit drawing tolerances taking priority over the automatically applied background rule set.
 - Ordered, downloadable JSON and PDF final reports.
 - A bilingual local explanation for every completed check, including possible causes and recommended verification steps.
 - Optional Gemini-primary explanations with automatic Groq fallback, based only on normalized comparison evidence and drawing text.
@@ -104,13 +104,13 @@ Open the repository Codespace and run:
 /opt/conda/envs/cad-ai-checker/bin/streamlit run app/main.py
 ```
 
-Open forwarded port `8501`, select **Run CAD Check / CAD照合**, upload one DXF and one STEP/STP file, select the STEP projection and general-tolerance application state, and press **Run CAD Check / CAD照合を実行**.
+Open forwarded port `8501`, select **Run CAD Check / CAD照合**, upload one DXF and one STEP/STP file, and press **Run CAD Check / CAD照合を実行**.
 
 After calculation, the dashboard displays:
 
 - Overall OK/NG judgement.
 - Dimension and profile summary.
-- Combined vector overlay.
+- Per-view DXF geometry, selected STEP projection, and comparison overlay.
 - Bilingual discrepancy explanation with possible causes and recommended checks.
 - Detailed comparison evidence.
 - JSON and PDF report download buttons.
