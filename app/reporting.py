@@ -451,7 +451,12 @@ def _render_pdf(report: FinalReport) -> bytes:
             _pdf_table(
                 ("Category", "Rule", "Check", "Details"),
                 tuple(
-                    (row["category"], row["rule"], row["check"], row["details"])
+                    (
+                        row.get("category", "—"),
+                        row.get("rule", "—"),
+                        row.get("check", "—"),
+                        row.get("details", "—"),
+                    )
                     for row in report.ng_findings
                 ),
                 (24 * mm, 20 * mm, 50 * mm, 88 * mm),
