@@ -13,7 +13,7 @@ from OCP.BRepAdaptor import BRepAdaptor_Curve
 from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Line
 
 
-SUPPORTED_VIEWS: Final = ("top", "front", "right")
+SUPPORTED_VIEWS: Final = ("top", "front", "right", "bottom", "rear", "left")
 MAX_STEP_FILE_SIZE_BYTES: Final = 25 * 1024 * 1024
 
 
@@ -63,6 +63,10 @@ def _project_xyz(x: float, y: float, z: float, view: str) -> Point2D:
         return Point2D(x=x, y=z)
     if view == "right":
         return Point2D(x=y, y=z)
+    if view in {"bottom", "rear", "left"}:
+        base = {"bottom": "top", "rear": "front", "left": "right"}[view]
+        point = _project_xyz(x, y, z, base)
+        return Point2D(x=-point.x, y=point.y)
     raise ProjectionError(f"Unsupported projection view: {view}")
 
 
@@ -73,6 +77,9 @@ def _view_direction(view: str) -> tuple[float, float, float]:
         return (0.0, 1.0, 0.0)
     if view == "right":
         return (1.0, 0.0, 0.0)
+    if view == "bottom": return (0.0, 0.0, -1.0)
+    if view == "rear": return (0.0, -1.0, 0.0)
+    if view == "left": return (-1.0, 0.0, 0.0)
     raise ProjectionError(f"Unsupported projection view: {view}")
 
 
@@ -167,9 +174,9 @@ def project_step_shape(shape: cq.Shape, view: str) -> StepProjection:
         primitives.append(ProjectedPrimitive(kind=kind, points=points))
 
     box = shape.BoundingBox()
-    if view == "top":
+    if view in {"top", "bottom"}:
         width, height = float(box.xlen), float(box.ylen)
-    elif view == "front":
+    elif view in {"front", "rear"}:
         width, height = float(box.xlen), float(box.zlen)
     else:
         width, height = float(box.ylen), float(box.zlen)

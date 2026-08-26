@@ -67,24 +67,28 @@ class FinalReport:
     visual_evidence: dict[str, object] | None
     warnings: tuple[str, ...]
     limitations: tuple[str, ...]
+    view_results: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return sections in the required report-reading order."""
         return {
-            "report_information": {
-                "schema_version": REPORT_SCHEMA_VERSION,
-                "generated_at_utc": self.generated_at_utc,
-                "report_type": "CAD drawing-to-model comparison",
-            },
             "judgement": {
                 "result": self.overall_judgement,
                 "label": self.judgement_label,
                 "reason": self.decision_reason,
             },
+            "report_information": {
+                "schema_version": REPORT_SCHEMA_VERSION,
+                "generated_at_utc": self.generated_at_utc,
+                "report_type": "CAD drawing-to-model comparison",
+            },
             "files": {
                 "drawing_2d": self.drawing_source,
                 "model_3d": self.model_source,
             },
+            "millimetre_units": {"unit": "mm", "dxf_unitless_policy": "Unitless DXF values are treated as millimetres."},
+            "detected_drawing_views": list(self.view_results),
+            "view_to_step_mapping": [{"view_id": row.get("view_id"), "step_match": row.get("selected_step_match"), "result": row.get("judgement")} for row in self.view_results],
             "general_tolerance": {
                 "applied": self.general_tolerance_applied,
                 "operator_display": "Applied" if self.general_tolerance_applied else "Not applied",
@@ -125,6 +129,7 @@ def build_final_report(
     *,
     ai_assistance: dict[str, object] | None = None,
     generated_at_utc: str | None = None,
+    view_results: Sequence[dict[str, object]] = (),
 ) -> FinalReport:
     """Build one final report from results produced by the same CAD file pair."""
     if matching_result.drawing_source != judgement.drawing_source:
@@ -222,6 +227,8 @@ def build_final_report(
         if assisted_judgement != overall:
             raise ValueError("Assisted explanation judgement does not match deterministic judgement")
 
+    view_ng = tuple({"category": "View", "view": item.get("view_id"), "check": item.get("detected_type"), "details": "; ".join(item.get("warnings", [])) or "Per-view comparison is NG."} for item in view_results if item.get("judgement") == NG)
+    overall = NG if view_ng else overall
     return FinalReport(
         generated_at_utc=generated_at_utc or _now_utc(),
         overall_judgement=overall,
@@ -236,13 +243,14 @@ def build_final_report(
         general_tolerance_applied=matching_result.general_tolerances.applied,
         dimension_summary=dimension_summary,
         profile_summary=profile_summary,
-        ng_findings=dimension_ng + profile_ng,
+        ng_findings=dimension_ng + profile_ng + view_ng,
         ai_assistance=ai_assistance,
         detailed_dimension_evidence=detailed_dimensions,
         detailed_profile_evidence=detailed_profiles,
         visual_evidence=visual_evidence,
         warnings=tuple(dict.fromkeys((*judgement.warnings, *matching_result.warnings))),
         limitations=tuple(limitations),
+        view_results=tuple(view_results),
     )
 
 

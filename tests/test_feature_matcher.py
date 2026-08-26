@@ -157,7 +157,7 @@ def test_inch_values_are_converted_to_millimetres() -> None:
     assert dimension_match.status == MATCHED
 
 
-def test_unitless_drawing_is_not_compared() -> None:
+def test_unitless_drawing_is_treated_as_millimetres() -> None:
     requirements = DrawingRequirements(
         source_name="unitless.dxf",
         units_name="Unitless",
@@ -171,9 +171,8 @@ def test_unitless_drawing_is_not_compared() -> None:
 
     result = match_features(requirements, _step_analysis())
 
-    assert result.matches == ()
-    assert result.unit_conversion_factor_to_mm is None
-    assert any("cannot be converted" in warning for warning in result.warnings)
+    assert result.unit_conversion_factor_to_mm == 1.0
+    assert result.matches
 
 
 def test_reject_non_positive_default_tolerance() -> None:

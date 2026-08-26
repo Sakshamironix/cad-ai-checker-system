@@ -1,5 +1,18 @@
 # CAD AI Checker
 
+## Milestone 13 — Multi-view DXF interpretation
+
+The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
+comparison so geometry from separate drawing views never combines. Unitless DXF values
+are treated as millimetres; recorded unit metadata is retained and unsupported metadata
+raises a warning. The deterministic engine selects orthographic STEP projections for
+standard views and centre-plane candidates for full sections. A view that cannot be
+classified or compared produces NG, never REVIEW. AI assistance can explain evidence
+only and cannot change the deterministic OK/NG judgement.
+
+Initial section support covers labelled and hatched full sections. Offset, revolved and
+non-orthogonal sections remain explicitly unsupported for this milestone.
+
 A browser-first engineering prototype that compares a 2D DXF drawing with a 3D STEP/STP model. Development and trials run in GitHub Codespaces through a Streamlit dashboard.
 
 ## Current milestone

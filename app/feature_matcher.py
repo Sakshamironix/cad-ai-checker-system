@@ -19,6 +19,7 @@ from app.step_reader import StepAnalysis
 DEFAULT_MATCH_TOLERANCE_MM: Final = 0.1
 
 UNIT_TO_MILLIMETRES: Final[dict[str, float]] = {
+    "Unitless": 1.0,
     "Millimetres": 1.0,
     "Centimetres": 10.0,
     "Metres": 1000.0,

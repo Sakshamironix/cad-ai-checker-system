@@ -33,14 +33,17 @@ from app.profile_comparison import (
     ProfileComparisonError,
     ProfileComparisonResult,
     compare_uploaded_profiles,
+    compare_multiview_profiles,
 )
 from app.reporting import build_final_report
+from app.view_segmentation import segment_views
+from app.view_classification import classify_views
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
 APP_STAGE: Final = (
-    "Milestone 12 — Visual dashboard + dual-provider AI\n"
-    "マイルストーン12 — ビジュアルダッシュボード・2系統AI"
+    "Milestone 13 — DXF multi-view and section-view interpretation\n"
+    "マイルストーン13 — DXF複数図面・断面図の解釈"
 )
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
@@ -721,24 +724,8 @@ def _render_matching_uploader() -> None:
         )
 
     _section_heading(2, "Set comparison options", "比較条件を設定")
-    option_columns = st.columns(2)
-    view_options = {
-        _bilingual("Auto", "自動"): "auto",
-        _bilingual("Top", "上面"): "top",
-        _bilingual("Front", "正面"): "front",
-        _bilingual("Right", "右側面"): "right",
-    }
+    option_columns = st.columns(1)
     with option_columns[0]:
-        selected_view_label = st.selectbox(
-            _bilingual("STEP projection", "STEP投影方向"),
-            options=list(view_options),
-            index=0,
-            help=_bilingual(
-                "Auto selects the projection that best matches the DXF profile.",
-                "自動ではDXF外形に最も一致する投影を選択します。",
-            ),
-        )
-    with option_columns[1]:
         tolerance_application_label = st.radio(
             _bilingual("General tolerance", "普通公差"),
             options=[
@@ -786,7 +773,7 @@ def _render_matching_uploader() -> None:
         step_file.name,
         len(step_file.getvalue()),
         general_tolerances.applied,
-        view_options[selected_view_label],
+        "auto",
     )
 
     if not run_check:
@@ -800,6 +787,9 @@ def _render_matching_uploader() -> None:
         matching_result = stored["matching_result"]
         judgement = stored["judgement"]
         profile_result = stored["profile_result"]
+        detected_views = stored["detected_views"]
+        classifications = stored["classifications"]
+        view_results = stored["view_results"]
     else:
         try:
             with st.spinner(_bilingual("Reading both CAD files and calculating the comparison...", "両方のCADファイルを読み込み、比較を計算しています…")):
@@ -818,8 +808,11 @@ def _render_matching_uploader() -> None:
                     step_file.getvalue(),
                     step_file.name,
                     tolerance_mm=profile_tolerance_mm,
-                    requested_view=view_options[selected_view_label],
+                    requested_view="auto",
                 )
+                detected_views = segment_views(dxf_analysis)
+                classifications = classify_views(dxf_analysis, detected_views)
+                view_results = compare_multiview_profiles(dxf_file.getvalue(), dxf_file.name, step_file.getvalue(), step_file.name, detected_views, classifications, profile_tolerance_mm)
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
             st.error(str(exc))
             return
@@ -832,12 +825,17 @@ def _render_matching_uploader() -> None:
             "matching_result": matching_result,
             "judgement": judgement,
             "profile_result": profile_result,
+            "detected_views": detected_views,
+            "classifications": classifications,
+            "view_results": view_results,
         }
         st.session_state.pop("cad_ai_explanation", None)
 
     st.divider()
+    _section_heading(3, "Detected drawing views", "検出された図面ビュー")
+    st.dataframe([{"View ID": item.view_id, "Type": item.view_type, "Geometry": next(view.geometry_count for view in detected_views if view.view_id == item.view_id), "Dimensions": next(len(view.dimension_indexes) for view in detected_views if view.view_id == item.view_id), "STEP match": item.selected_step_match or "—", "Result": item.judgement} for item in view_results], use_container_width=True, hide_index=True)
     _section_heading(3, "Judgement", "判定")
-    overall_judgement = NG if NG in {judgement.decision, profile_result.judgement} else OK
+    overall_judgement = NG if NG in {judgement.decision, profile_result.judgement, *(item.judgement for item in view_results)} else OK
     if overall_judgement == OK:
         st.success(_bilingual("Overall judgement: OK", "総合判定：OK"))
         st.write(_bilingual("The available dimension and projected-profile comparisons agree.", "確認可能な寸法および投影輪郭の比較は一致しています。"))
@@ -935,6 +933,7 @@ def _render_matching_uploader() -> None:
         judgement,
         profile_result,
         overlay,
+        view_results=tuple(item.to_dict() for item in view_results),
     )
     local_explanation = build_deterministic_explanation(base_report, requirements.notes)
     stored_explanation = st.session_state.get("cad_ai_explanation")
@@ -1000,6 +999,7 @@ def _render_matching_uploader() -> None:
         judgement,
         profile_result,
         overlay,
+        view_results=tuple(item.to_dict() for item in view_results),
         ai_assistance=active_explanation.to_dict(),
     )
     report_columns = st.columns(3)
