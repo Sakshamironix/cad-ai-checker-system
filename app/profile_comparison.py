@@ -12,6 +12,9 @@ import ezdxf
 import numpy as np
 
 from app.projection import Point2D, ProjectionError, StepProjection, project_step_bytes
+from app.step_section import generate_step_sections
+from app.view_classification import ViewClassification
+from app.view_segmentation import DrawingView
 
 OK = "OK"
 NG = "NG"
@@ -175,6 +178,51 @@ def extract_dxf_profile(data: bytes, filename: str) -> tuple[ProfilePrimitive, .
             "The DXF contains no supported LINE, ARC, CIRCLE, POLYLINE, or SPLINE profile geometry."
         )
     return tuple(primitives)
+
+
+def extract_dxf_profile_view(data: bytes, filename: str, view: DrawingView) -> tuple[ProfilePrimitive, ...]:
+    """Extract geometry only from one segmented view; annotations never leak across views."""
+    suffix = Path(filename).suffix.lower()
+    if suffix != ".dxf": raise ProfileComparisonError("Only .dxf drawings are supported.")
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(suffix=suffix, delete=False) as temporary_file:
+            temporary_file.write(data); temporary_path = Path(temporary_file.name)
+        document = ezdxf.readfile(temporary_path)
+        return tuple(primitive for index, entity in enumerate(document.modelspace(), 1) if index in view.entity_indexes for primitive in _entity_primitives(entity))
+    except Exception as exc:
+        raise ProfileComparisonError(f"Could not read DXF view geometry: {exc}") from exc
+    finally:
+        if temporary_path: temporary_path.unlink(missing_ok=True)
+
+
+@dataclass(frozen=True)
+class ViewProfileResult:
+    view_id: str; view_type: str; selected_step_match: str | None; result: ProfileComparisonResult | None; warnings: tuple[str, ...]
+    @property
+    def judgement(self) -> str: return self.result.judgement if self.result else NG
+    def to_dict(self) -> dict[str, object]:
+        return {"view_id": self.view_id, "detected_type": self.view_type, "selected_step_match": self.selected_step_match, "judgement": self.judgement, "warnings": list(self.warnings), "profile": self.result.to_dict() if self.result else None}
+
+
+def compare_multiview_profiles(dxf_data: bytes, dxf_filename: str, step_data: bytes, step_filename: str, views: tuple[DrawingView, ...], classifications: tuple[ViewClassification, ...], tolerance_mm: float | None) -> tuple[ViewProfileResult, ...]:
+    """Compare each isolated view to an independent projection or centre section candidate."""
+    by_id = {item.view_id: item for item in classifications}; projections = project_step_bytes(step_data, step_filename); sections = generate_step_sections(step_data, step_filename)
+    results=[]
+    for view in views:
+        classification=by_id.get(view.view_id)
+        kind=classification.detected_type if classification else "Unknown view"
+        primitives=extract_dxf_profile_view(dxf_data, dxf_filename, view)
+        if not primitives:
+            results.append(ViewProfileResult(view.view_id, kind, None, None, ("NG — View has no supported comparable geometry.",))); continue
+        candidates = [item.projection for item in sections] if "section" in kind.lower() else list(projections)
+        if kind == "Unknown view":
+            results.append(ViewProfileResult(view.view_id, kind, None, None, ("NG — Drawing view could not be deterministically classified.",))); continue
+        projection=min(candidates, key=lambda item: _best_profile_deviation(_all_points(primitives), _all_points(item.primitives)))
+        result=compare_profile_geometry(primitives, projection, tolerance_mm, drawing_source=dxf_filename, model_source=step_filename)
+        match = next((item.plane for item in sections if item.projection == projection), projection.view)
+        results.append(ViewProfileResult(view.view_id, kind, match, result, ()))
+    return tuple(results)
 
 
 def _all_points(primitives: Iterable[ProfilePrimitive | object]) -> np.ndarray:

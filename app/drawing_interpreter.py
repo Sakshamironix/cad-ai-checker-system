@@ -60,6 +60,7 @@ class DimensionRequirement:
     unit: str
     layer: str
     source_text: str | None
+    view_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ class DrawingRequirements:
     hole_candidates: tuple[HoleCandidateRequirement, ...]
     notes: tuple[str, ...]
     warnings: tuple[str, ...]
+    unit_system: str = "mm"
 
     @property
     def resolved_dimension_count(self) -> int:
@@ -240,7 +242,7 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
                 tolerance_source=tolerance_source,
                 minimum_value=minimum_value,
                 maximum_value=maximum_value,
-                unit=analysis.units_name,
+                unit="Millimetres",
                 layer=dimension.layer,
                 source_text=dimension.text_override,
             )
@@ -253,7 +255,7 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
             center=circle.center,
             diameter=circle.diameter,
             radius=circle.radius,
-            unit=analysis.units_name,
+            unit="Millimetres",
         )
         for circle in analysis.circles
     )
@@ -263,12 +265,14 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
         drawing_size = DrawingSizeRequirement(
             width=analysis.extents.width,
             height=analysis.extents.height,
-            unit=analysis.units_name,
+            unit="Millimetres",
         )
 
     warnings: list[str] = []
     if analysis.units_code == 0:
-        warnings.append("The DXF is unitless; numeric requirements cannot be safely scaled.")
+        warnings.append("The DXF is unitless and is interpreted as millimetres by Milestone 13 policy.")
+    elif analysis.units_code not in {1, 2, 4, 5, 6}:
+        warnings.append(f"DXF unit metadata '{analysis.units_name}' is not explicitly supported; values are treated as millimetres and require verification.")
     if drawing_size is None:
         warnings.append("No measurable model-space drawing extents were found.")
     if not dimensions:
@@ -282,7 +286,7 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
 
     return DrawingRequirements(
         source_name=analysis.source_name,
-        units_name=analysis.units_name,
+        units_name="Millimetres" if analysis.units_code in {0, 4} else analysis.units_name,
         drawing_size=drawing_size,
         general_tolerance=general_tolerance,
         dimensions=tuple(dimensions),

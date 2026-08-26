@@ -121,6 +121,8 @@ class DimensionFeature:
     measurement: float | None
     text_override: str | None
     style: str
+    definition_point: Point2D | None = None
+    text_position: Point2D | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,18 @@ class TextFeature:
     entity_type: str
     layer: str
     content: str
+    position: Point2D | None = None
+
+
+@dataclass(frozen=True)
+class EntityLocation:
+    """Location and bounds preserved for deterministic view segmentation."""
+
+    entity_index: int
+    entity_type: str
+    minimum: Point2D
+    maximum: Point2D
+    layer: str
 
 
 @dataclass(frozen=True)
@@ -149,6 +163,10 @@ class DxfAnalysis:
     dimensions: tuple[DimensionFeature, ...]
     texts: tuple[TextFeature, ...]
     entity_types: dict[str, int]
+    entity_locations: tuple[EntityLocation, ...] = ()
+    hatch_count: int = 0
+    block_insert_count: int = 0
+    unit_scale_to_mm: float = 1.0
 
     def to_dict(self) -> dict[str, object]:
         """Convert the complete result into Streamlit/JSON-friendly values."""
@@ -196,6 +214,28 @@ def _drawing_extents(modelspace: object) -> DrawingExtents | None:
     )
 
 
+def _entity_location(entity: object, entity_index: int, entity_type: str, layer: str) -> EntityLocation | None:
+    """Return a robust entity bounding box without failing a whole drawing."""
+    try:
+        box = bbox.extents([entity], fast=True)
+        if box.has_data:
+            return EntityLocation(
+                entity_index, entity_type,
+                Point2D(float(box.extmin.x), float(box.extmin.y)),
+                Point2D(float(box.extmax.x), float(box.extmax.y)), layer,
+            )
+    except (DXFError, TypeError, ValueError):
+        pass
+    return None
+
+
+def _point(value: object) -> Point2D | None:
+    try:
+        return Point2D(float(value.x), float(value.y))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> DxfAnalysis:
     """Load and analyze a DXF drawing from disk."""
     path = Path(file_path)
@@ -225,17 +265,21 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
         "POLYLINE",
         "TEXT",
         "MTEXT",
-        "DIMENSION",
+        "DIMENSION", "HATCH", "INSERT",
     }
 
     circles: list[CircleFeature] = []
     arcs: list[ArcFeature] = []
     dimensions: list[DimensionFeature] = []
     texts: list[TextFeature] = []
+    locations: list[EntityLocation] = []
 
     for entity_index, entity in enumerate(entities, start=1):
         entity_type = entity.dxftype()
         layer = str(entity.dxf.layer)
+        location = _entity_location(entity, entity_index, entity_type, layer)
+        if location is not None:
+            locations.append(location)
 
         if entity_type == "CIRCLE":
             center = entity.dxf.center
@@ -275,6 +319,8 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
                     measurement=_read_measurement(entity),
                     text_override=text_override,
                     style=str(entity.dxf.dimstyle),
+                    definition_point=_point(getattr(entity.dxf, "defpoint", None)),
+                    text_position=_point(getattr(entity.dxf, "text_midpoint", None)),
                 )
             )
         elif entity_type in {"TEXT", "MTEXT"}:
@@ -284,10 +330,12 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
                     entity_type=entity_type,
                     layer=layer,
                     content=_read_text(entity, entity_type),
+                    position=_point(getattr(entity.dxf, "insert", None)),
                 )
             )
 
     units_code = int(document.header.get("$INSUNITS", 0))
+    unit_scale_to_mm = {0: 1.0, 1: 25.4, 2: 304.8, 4: 1.0, 5: 10.0, 6: 1000.0}.get(units_code, 1.0)
     layers = tuple(sorted(str(layer.dxf.name) for layer in document.layers))
     other_count = sum(
         count for entity_type, count in type_counts.items() if entity_type not in supported_types
@@ -317,6 +365,10 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
         dimensions=tuple(dimensions),
         texts=tuple(texts),
         entity_types=dict(sorted(type_counts.items())),
+        entity_locations=tuple(locations),
+        hatch_count=type_counts["HATCH"],
+        block_insert_count=type_counts["INSERT"],
+        unit_scale_to_mm=unit_scale_to_mm,
     )
 
 

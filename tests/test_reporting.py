@@ -88,9 +88,12 @@ def test_report_sections_follow_required_order() -> None:
     report = _report()
 
     assert list(report.to_dict()) == [
-        "report_information",
         "judgement",
+        "report_information",
         "files",
+        "millimetre_units",
+        "detected_drawing_views",
+        "view_to_step_mapping",
         "general_tolerance",
         "dimension_summary",
         "profile_summary",
