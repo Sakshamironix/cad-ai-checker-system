@@ -48,6 +48,8 @@ class HoleFeature:
     face_index: int
     radius: float
     diameter: float
+    center: Vector3D | None = None
+    axis: Vector3D | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ class StepAnalysis:
     outer_boundary_length: float
     holes: tuple[HoleFeature, ...]
     toroidal_faces: int = 0
+    minimum: Vector3D | None = None
+    maximum: Vector3D | None = None
 
     @property
     def hole_count(self) -> int:
@@ -92,6 +96,41 @@ def _cylindrical_face_radius(face: cq.Face) -> float:
     """Read a cylindrical face radius using OpenCASCADE's surface adaptor."""
     adaptor = BRepAdaptor_Surface(face.wrapped)
     return float(adaptor.Cylinder().Radius())
+
+
+def _cylindrical_axis(face: cq.Face) -> tuple[Vector3D | None, Vector3D | None]:
+    """Return the cylinder axis origin and direction when OpenCASCADE exposes it."""
+    try:
+        axis = BRepAdaptor_Surface(face.wrapped).Cylinder().Axis()
+        origin = axis.Location()
+        direction = axis.Direction()
+        return (
+            Vector3D(float(origin.X()), float(origin.Y()), float(origin.Z())),
+            Vector3D(float(direction.X()), float(direction.Y()), float(direction.Z())),
+        )
+    except Exception:
+        return None, None
+
+
+def _deduplicate_holes(holes: list[HoleFeature]) -> tuple[HoleFeature, ...]:
+    """Collapse duplicate cylindrical faces belonging to the same physical hole."""
+    unique: list[HoleFeature] = []
+    keys: set[tuple[float, ...]] = set()
+    for hole in holes:
+        if hole.center is None or hole.axis is None:
+            unique.append(hole)
+            continue
+        direction = (hole.axis.x, hole.axis.y, hole.axis.z)
+        # Cylinder axes are equivalent when reversed; normalise the sign.
+        if next((value for value in direction if abs(value) > 1e-9), 1.0) < 0:
+            direction = tuple(-value for value in direction)
+        key = tuple(round(value, 6) for value in (
+            hole.radius, hole.center.x, hole.center.y, hole.center.z, *direction
+        ))
+        if key not in keys:
+            keys.add(key)
+            unique.append(hole)
+    return tuple(unique)
 
 
 def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> StepAnalysis:
@@ -143,11 +182,14 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
             cylindrical_faces += 1
             if face.wrapped.Orientation() == TopAbs_REVERSED:
                 radius = _cylindrical_face_radius(face)
+                center, axis = _cylindrical_axis(face)
                 holes.append(
                     HoleFeature(
                         face_index=face_index,
                         radius=radius,
                         diameter=radius * 2.0,
+                        center=center,
+                        axis=axis,
                     )
                 )
         elif surface_type == GeomAbs_Torus:
@@ -193,8 +235,10 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
         circular_edges=circular_edges,
         outer_boundaries=outer_boundaries,
         outer_boundary_length=outer_boundary_length,
-        holes=tuple(holes),
+        holes=_deduplicate_holes(holes),
         toroidal_faces=toroidal_faces,
+        minimum=Vector3D(float(bounding_box.xmin), float(bounding_box.ymin), float(bounding_box.zmin)),
+        maximum=Vector3D(float(bounding_box.xmax), float(bounding_box.ymax), float(bounding_box.zmax)),
     )
 
 
