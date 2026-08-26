@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.comparison_rules import FAIL, PASS, evaluate_matching_result
+from app.comparison_rules import NG, OK, evaluate_matching_result
 from app.dashboard import build_dashboard_rows
 from app.feature_matcher import (
     MATCHED,
@@ -49,7 +49,7 @@ def test_dashboard_row_calculates_limits_for_pass() -> None:
 
     row = build_dashboard_rows(result, judgement)[0]
 
-    assert row.outcome == PASS
+    assert row.outcome == OK
     assert row.allowed_minimum_mm == pytest.approx(5.9)
     assert row.allowed_maximum_mm == pytest.approx(6.1)
     assert row.difference_mm == pytest.approx(0.05)
@@ -62,7 +62,7 @@ def test_dashboard_row_calculates_amount_above_limit() -> None:
 
     row = build_dashboard_rows(result, judgement)[0]
 
-    assert row.outcome == FAIL
+    assert row.outcome == NG
     assert row.difference_mm == pytest.approx(0.25)
     assert row.outside_limit_by_mm == pytest.approx(0.15)
 

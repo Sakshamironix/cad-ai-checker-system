@@ -1,3 +1,4 @@
+
 """Convert raw DXF analysis into structured engineering requirements."""
 
 from __future__ import annotations

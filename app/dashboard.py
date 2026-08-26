@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 
 from app.comparison_rules import EngineeringJudgement
 from app.feature_matcher import FeatureMatch, FeatureMatchingResult
+from app.profile_comparison import ProfileComparisonResult
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,22 @@ class DashboardRow:
 
     def to_dict(self) -> dict[str, object]:
         """Return a stable dictionary for Streamlit tables."""
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SummaryRow:
+    """Compact judgement-first row shown before technical evidence."""
+
+    judgement: str
+    category: str
+    check: str
+    drawing_value: float | int | str | None
+    model_value: float | int | str | None
+    difference: float | None
+    tolerance: str
+
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
@@ -98,6 +115,49 @@ def build_dashboard_rows(
                 confidence=(match.confidence if match else "none"),
                 source_entity=finding.source_entity,
                 reason=finding.message,
+            )
+        )
+    return tuple(rows)
+
+
+def build_summary_rows(
+    matching_result: FeatureMatchingResult,
+    judgement: EngineeringJudgement,
+    profile_result: ProfileComparisonResult,
+) -> tuple[SummaryRow, ...]:
+    """Return dimensions first, followed by profile checks."""
+    detailed_rows = build_dashboard_rows(matching_result, judgement)
+    rows: list[SummaryRow] = []
+    for row in detailed_rows:
+        if row.drawing_value_mm is None and row.model_value_mm is None:
+            continue
+        tolerance = "Fallback comparison limit"
+        if row.allowed_minimum_mm is not None and row.allowed_maximum_mm is not None:
+            tolerance = f"{row.allowed_minimum_mm:.6g} to {row.allowed_maximum_mm:.6g} mm"
+        rows.append(
+            SummaryRow(
+                judgement=row.outcome,
+                category="Dimension",
+                check=row.requirement,
+                drawing_value=row.drawing_value_mm,
+                model_value=row.model_value_mm,
+                difference=row.difference_mm,
+                tolerance=tolerance,
+            )
+        )
+
+    for check in profile_result.checks:
+        rows.append(
+            SummaryRow(
+                judgement=check.judgement,
+                category=check.category,
+                check=check.feature,
+                drawing_value=check.drawing_value,
+                model_value=check.model_value,
+                difference=check.difference,
+                tolerance=(
+                    f"±{check.tolerance:.6g} mm" if check.tolerance is not None else "Not applicable"
+                ),
             )
         )
     return tuple(rows)

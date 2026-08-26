@@ -14,9 +14,13 @@ from app.feature_matcher import (
     FeatureMatchingResult,
 )
 
-PASS = "PASS"
-FAIL = "FAIL"
-REVIEW = "REVIEW"
+OK = "OK"
+NG = "NG"
+
+# Compatibility aliases for existing callers while the UI and reports use OK/NG only.
+PASS = OK
+FAIL = NG
+REVIEW = NG
 
 
 @dataclass(frozen=True)
@@ -25,8 +29,8 @@ class RulePolicy:
 
     fail_on_missing_model_candidate: bool = True
     fail_on_unmatched_3d_feature: bool = True
-    low_confidence_requires_review: bool = True
-    unsupported_requires_review: bool = True
+    low_confidence_requires_review: bool = False
+    unsupported_requires_review: bool = False
     minimum_comparisons: int = 1
 
     def __post_init__(self) -> None:
@@ -70,7 +74,7 @@ class EngineeringJudgement:
 
     @property
     def review_count(self) -> int:
-        return sum(finding.outcome == REVIEW for finding in self.findings)
+        return 0
 
     @property
     def decisive_count(self) -> int:
@@ -114,30 +118,27 @@ def _finding_for_match(
         )
 
     if match.status == NO_MODEL_CANDIDATE:
-        outcome = FAIL if policy.fail_on_missing_model_candidate else REVIEW
         return RuleFinding(
             rule_id="R-003",
-            outcome=outcome,
+            outcome=NG,
             title="Missing compatible 3D feature",
             message=match.reason,
             **common,
         )
 
     if match.status == UNMATCHED_3D:
-        outcome = FAIL if policy.fail_on_unmatched_3d_feature else REVIEW
         return RuleFinding(
             rule_id="R-004",
-            outcome=outcome,
+            outcome=NG,
             title="Unmatched 3D feature",
             message=match.reason,
             **common,
         )
 
     if match.status == UNSUPPORTED:
-        outcome = REVIEW if policy.unsupported_requires_review else PASS
         return RuleFinding(
             rule_id="R-005",
-            outcome=outcome,
+            outcome=NG,
             title="Unsupported requirement",
             message=match.reason,
             **common,
@@ -147,25 +148,14 @@ def _finding_for_match(
         if match.difference_mm is None or match.model_value_mm is None:
             return RuleFinding(
                 rule_id="R-006",
-                outcome=REVIEW,
+                outcome=NG,
                 title="Incomplete comparison evidence",
                 message="The match is marked successful but required numeric evidence is missing.",
                 **common,
             )
-        if match.confidence == "low" and policy.low_confidence_requires_review:
-            return RuleFinding(
-                rule_id="R-007",
-                outcome=REVIEW,
-                title="Low-confidence match",
-                message=(
-                    f"The numeric comparison is within limits, but the match confidence is low. "
-                    f"{match.reason}"
-                ),
-                **common,
-            )
         return RuleFinding(
             rule_id="R-001",
-            outcome=PASS,
+            outcome=OK,
             title="Requirement within limits",
             message=match.reason,
             **common,
@@ -173,7 +163,7 @@ def _finding_for_match(
 
     return RuleFinding(
         rule_id="R-999",
-        outcome=REVIEW,
+        outcome=NG,
         title="Unknown matching status",
         message=f"Unsupported feature-match status: {match.status}",
         **common,
@@ -183,19 +173,16 @@ def _finding_for_match(
 def _decision(findings: tuple[RuleFinding, ...], policy: RulePolicy) -> tuple[str, str]:
     """Resolve the overall decision using failure-first precedence."""
     fail_count = sum(finding.outcome == FAIL for finding in findings)
-    review_count = sum(finding.outcome == REVIEW for finding in findings)
-    pass_count = sum(finding.outcome == PASS for finding in findings)
+    pass_count = sum(finding.outcome == OK for finding in findings)
 
     if fail_count:
-        return FAIL, f"{fail_count} mandatory comparison rule(s) failed."
-    if review_count:
-        return REVIEW, f"{review_count} item(s) require engineering review."
+        return NG, f"{fail_count} comparison rule(s) are NG."
     if pass_count < policy.minimum_comparisons:
-        return REVIEW, (
+        return NG, (
             f"Only {pass_count} decisive comparison(s) were available; "
             f"at least {policy.minimum_comparisons} are required."
         )
-    return PASS, f"All {pass_count} decisive comparison rule(s) passed."
+    return OK, f"All {pass_count} available comparison rule(s) are OK."
 
 
 def evaluate_matching_result(
@@ -213,7 +200,7 @@ def evaluate_matching_result(
         findings = (
             RuleFinding(
                 rule_id="R-000",
-                outcome=REVIEW,
+                outcome=NG,
                 title="No comparable evidence",
                 message="No 2D-to-3D feature comparisons were available for judgement.",
                 match_index=None,
@@ -232,7 +219,7 @@ def evaluate_matching_result(
         drawing_source=result.drawing_source,
         model_source=result.model_source,
         decision=decision,
-        release_allowed=decision == PASS,
+        release_allowed=decision == OK,
         decision_reason=reason,
         policy=active_policy,
         findings=findings,
