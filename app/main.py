@@ -70,6 +70,15 @@ DASHBOARD_CSS: Final = """
 [data-testid="stAppViewContainer"] *, [data-testid="stSidebar"] * {
   font-family: "Sora", "Noto Sans JP", "Segoe UI", sans-serif !important;
 }
+/* Streamlit uses Material Symbols for controls. The dashboard font must not
+   replace that icon font, otherwise glyph names such as `keyboard_arrow_right`
+   are rendered as visible text and overlap the control contents. */
+.material-symbols-rounded, .material-symbols-outlined, .material-icons,
+[data-testid="stIconMaterial"] {
+  font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons" !important;
+  font-style: normal !important;
+  font-weight: normal !important;
+}
 [data-testid="stHeader"] { background: rgba(11, 34, 52, 0.94); border-bottom: 1px solid var(--cad-border-soft); }
 [data-testid="stToolbar"] { right: 1.25rem; }
 .block-container { max-width: 1380px; padding-top: 0.8rem; padding-bottom: 5rem; }
