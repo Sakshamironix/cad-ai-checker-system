@@ -32,6 +32,7 @@ def _features_for_requirement(requirement: DimensionRequirement, step: StepAnaly
 def map_dimensions(requirements: DrawingRequirements, step: StepAnalysis, candidate_margin_mm: float = 0.000001) -> tuple[DimensionMapping, ...]:
     """Map only unique, type-compatible STEP features; ambiguity is an NG finding."""
     mappings: list[DimensionMapping] = []
+    used_features_by_view: dict[str, set[str]] = {}
     for ordinal, requirement in enumerate(requirements.dimensions, start=1):
         requirement_id = requirement.requirement_id or f"DIM-{ordinal:03d}"
         if requirement.nominal_value is None:
@@ -43,7 +44,17 @@ def map_dimensions(requirements: DrawingRequirements, step: StepAnalysis, candid
         best = ranked[0]
         tied = len(ranked) > 1 and abs(abs(ranked[1].value_mm-requirement.nominal_value)-abs(best.value_mm-requirement.nominal_value)) <= candidate_margin_mm
         if tied:
-            mappings.append(DimensionMapping(requirement_id, requirement.view_id, None, None, (), "Low", "NG", "Multiple STEP features satisfy the same deterministic mapping conditions.")); continue
+            # The assigned DXF view is deterministic evidence. It lets repeated
+            # same-size features be assigned one-to-one without borrowing a
+            # feature from another drawing view.
+            used = used_features_by_view.setdefault(requirement.view_id, set()) if requirement.view_id else set()
+            available = [item for item in ranked if item.feature_id not in used]
+            if requirement.view_id and available:
+                best = available[0]
+            else:
+                mappings.append(DimensionMapping(requirement_id, requirement.view_id, None, None, (), "Low", "NG", "Multiple STEP features satisfy the same deterministic mapping conditions.")); continue
         drawing_feature = "Circular boundary" if requirement.classification in {"diameter", "radius"} else "Overall extent"
+        if requirement.view_id:
+            used_features_by_view.setdefault(requirement.view_id, set()).add(best.feature_id)
         mappings.append(DimensionMapping(requirement_id, requirement.view_id, drawing_feature, best.feature_id, (best.evidence, f"Type-compatible {best.feature_type}"), "High", "OK"))
     return tuple(mappings)
