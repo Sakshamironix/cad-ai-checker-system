@@ -9,7 +9,7 @@ from typing import Final
 
 import cadquery as cq
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Cylinder, GeomAbs_Plane
+from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Torus
 from OCP.TopAbs import TopAbs_REVERSED
 
 SUPPORTED_STEP_EXTENSIONS: Final = {".step", ".stp"}
@@ -65,6 +65,7 @@ class StepAnalysis:
     outer_boundaries: int
     outer_boundary_length: float
     holes: tuple[HoleFeature, ...]
+    toroidal_faces: int = 0
 
     @property
     def hole_count(self) -> int:
@@ -124,6 +125,7 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
 
     planar_faces = 0
     cylindrical_faces = 0
+    toroidal_faces = 0
     holes: list[HoleFeature] = []
     outer_boundaries = 0
     outer_boundary_length = 0.0
@@ -144,6 +146,8 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
                         diameter=radius * 2.0,
                     )
                 )
+        elif surface_type == GeomAbs_Torus:
+            toroidal_faces += 1
 
         try:
             outer_wire = face.outerWire()
@@ -186,6 +190,7 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
         outer_boundaries=outer_boundaries,
         outer_boundary_length=outer_boundary_length,
         holes=tuple(holes),
+        toroidal_faces=toroidal_faces,
     )
 
 

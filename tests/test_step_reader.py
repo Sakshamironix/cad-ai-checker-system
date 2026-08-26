@@ -34,6 +34,7 @@ def test_analyze_rectangular_box(tmp_path: Path) -> None:
     assert result.center_of_mass.z == pytest.approx(0.0, abs=1e-9)
     assert result.planar_faces == 6
     assert result.cylindrical_faces == 0
+    assert result.toroidal_faces == 0
     assert result.circular_edges == 0
     assert result.hole_count == 0
     assert result.outer_boundaries == 6
