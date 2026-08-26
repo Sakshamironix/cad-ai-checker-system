@@ -257,7 +257,16 @@ def _projection_selection_score(
 
 
 def _all_points(primitives: Iterable[ProfilePrimitive | object]) -> np.ndarray:
-    rows = [(point.x, point.y) for primitive in primitives for point in primitive.points]
+    rows: list[tuple[float, float]] = []
+    for primitive in primitives:
+        points = primitive.points
+        # STEP line edges are often represented by their two vertices only,
+        # whereas DXF lines are sampled.  Compare the geometry, not the two
+        # different sampling densities; otherwise a midpoint on a valid 80 mm
+        # edge appears far away from both STEP endpoints.
+        if primitive.kind == "line" and len(points) == 2:
+            points = _line_points(points[0], points[1])
+        rows.extend((point.x, point.y) for point in points)
     if not rows:
         return np.empty((0, 2), dtype=float)
     return np.asarray(rows, dtype=float)
@@ -267,6 +276,47 @@ def _bounds(points: np.ndarray) -> tuple[float, float, float, float]:
     minimum = points.min(axis=0)
     maximum = points.max(axis=0)
     return float(minimum[0]), float(minimum[1]), float(maximum[0]), float(maximum[1])
+
+
+def _outer_contour_points(primitives: Sequence[ProfilePrimitive | object]) -> np.ndarray:
+    """Return the exterior silhouette without internal projected STEP edges.
+
+    A projected solid may contain bore walls or seam edges that are not drawn
+    in an orthographic DXF view.  They are feature evidence, not the outer
+    profile.  Dimensions and circle checks assess those features separately.
+    """
+    all_points = _all_points(primitives)
+    if all_points.size == 0:
+        return all_points
+    minimum_x, minimum_y, maximum_x, maximum_y = _bounds(all_points)
+    epsilon = 1e-6
+    exterior: list[object] = []
+    for primitive in primitives:
+        if primitive.kind == "circle" and primitive.radius is not None:
+            primitive_points = _all_points((primitive,))
+            left, bottom, right, top = _bounds(primitive_points)
+            if (
+                abs(left - minimum_x) <= epsilon
+                and abs(right - maximum_x) <= epsilon
+                and abs(bottom - minimum_y) <= epsilon
+                and abs(top - maximum_y) <= epsilon
+            ):
+                exterior.append(primitive)
+            continue
+        if primitive.kind != "line":
+            continue
+        primitive_points = _all_points((primitive,))
+        on_vertical_boundary = np.all(
+            np.isclose(primitive_points[:, 0], minimum_x, atol=epsilon)
+            | np.isclose(primitive_points[:, 0], maximum_x, atol=epsilon)
+        )
+        on_horizontal_boundary = np.all(
+            np.isclose(primitive_points[:, 1], minimum_y, atol=epsilon)
+            | np.isclose(primitive_points[:, 1], maximum_y, atol=epsilon)
+        )
+        if on_vertical_boundary or on_horizontal_boundary:
+            exterior.append(primitive)
+    return _all_points(exterior) if exterior else all_points
 
 
 def _center_on_bounds(points: np.ndarray) -> np.ndarray:
@@ -296,17 +346,25 @@ def _directed_hausdorff(first: np.ndarray, second: np.ndarray) -> float:
 
 
 def _best_profile_deviation(dxf_points: np.ndarray, step_points: np.ndarray) -> float:
+    """Return the best rigid 2D fit, including mirrored orthographic views.
+
+    A front and rear drawing view may represent the same STEP face with one
+    image axis reversed.  Treating that reflection as a geometry error makes
+    otherwise identical hole layouts appear tens of millimetres apart.
+    """
     dxf_centered = _center_on_bounds(dxf_points)
     step_centered = _center_on_bounds(step_points)
     candidates: list[float] = []
-    for turns in range(4):
-        rotated = _rotate(step_centered, turns)
-        candidates.append(
-            max(
-                _directed_hausdorff(dxf_centered, rotated),
-                _directed_hausdorff(rotated, dxf_centered),
+    orientations = (step_centered, step_centered * np.asarray((-1.0, 1.0)))
+    for oriented in orientations:
+        for turns in range(4):
+            rotated = _rotate(oriented, turns)
+            candidates.append(
+                max(
+                    _directed_hausdorff(dxf_centered, rotated),
+                    _directed_hausdorff(rotated, dxf_centered),
+                )
             )
-        )
     return min(candidates)
 
 
@@ -409,7 +467,10 @@ def compare_profile_geometry(
             )
         )
 
-    deviation = _best_profile_deviation(dxf_points, step_points)
+    deviation = _best_profile_deviation(
+        _outer_contour_points(dxf_primitives),
+        _outer_contour_points(projection.primitives),
+    )
     deviation_judgement = (
         OK if tolerance_mm is not None and deviation <= tolerance_mm else NG
     )
