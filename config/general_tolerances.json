@@ -1,0 +1,12 @@
+{
+  "rule_set": {
+    "id": "PROJECT-GENERAL-TOLERANCE",
+    "version": "1.0",
+    "unit": "mm",
+    "status": "provisional"
+  },
+  "linear": [],
+  "angular": [],
+  "radii_and_chamfers": [],
+  "feature_specific": []
+}

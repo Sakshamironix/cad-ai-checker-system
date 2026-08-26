@@ -96,6 +96,7 @@ def test_report_sections_follow_required_order() -> None:
         "view_to_step_mapping",
         "general_tolerance",
         "dimension_summary",
+        "dimension_to_feature_mapping",
         "profile_summary",
         "ng_findings",
         "ai_assistance",
@@ -117,6 +118,7 @@ def test_json_report_is_complete_and_hides_background_values() -> None:
     assert payload["general_tolerance"]["rule_source"] == "Background rule set"
     assert "linear_mm" not in payload["general_tolerance"]
     assert payload["dimension_summary"][0]["judgement"] == NG
+    assert payload["dimension_to_feature_mapping"] == []
 
 
 def test_pdf_report_is_a_nonempty_pdf() -> None:

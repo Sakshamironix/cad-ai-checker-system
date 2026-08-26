@@ -58,6 +58,15 @@ def test_parse_placeholder_uses_measured_value() -> None:
     assert result.tolerance.upper_deviation == pytest.approx(0.10)
 
 
+def test_parse_limit_dimension() -> None:
+    result = parse_dimension_text("19.95 / 20.05", measured_value=20.0)
+
+    assert result.nominal_value == pytest.approx(20.0)
+    assert result.tolerance is not None
+    assert result.tolerance.lower_deviation == pytest.approx(-0.05)
+    assert result.tolerance.upper_deviation == pytest.approx(0.05)
+
+
 def test_interpret_dimensions_general_tolerance_and_holes() -> None:
     analysis = DxfAnalysis(
         source_name="plate.dxf",

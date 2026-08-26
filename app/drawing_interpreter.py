@@ -27,6 +27,9 @@ NOMINAL_PREFIX_PATTERN = re.compile(
     rf"^\s*(?:\d+\s*[xX]\s*)?(?:⌀|Ø|R)?\s*(<>|{SIGNED_NUMBER_PATTERN})",
     re.IGNORECASE,
 )
+LIMIT_DIMENSION_PATTERN = re.compile(
+    rf"^\s*({SIGNED_NUMBER_PATTERN})\s*/\s*({SIGNED_NUMBER_PATTERN})\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,13 @@ class DimensionRequirement:
     layer: str
     source_text: str | None
     view_id: str | None = None
+    requirement_id: str | None = None
+    drawing_feature_id: str | None = None
+    step_feature_id: str | None = None
+    mapping_evidence: tuple[str, ...] = ()
+    mapping_confidence: str | None = None
+    comparison_status: str | None = None
+    ng_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +156,13 @@ def parse_dimension_text(
         return ParsedDimensionText(nominal_value=measured_value, tolerance=None)
 
     normalized = _normalize_text(text)
+    limit = LIMIT_DIMENSION_PATTERN.match(normalized)
+    if limit is not None:
+        lower, upper = float(limit.group(1)), float(limit.group(2))
+        if lower > upper:
+            lower, upper = upper, lower
+        nominal = measured_value if measured_value is not None else (lower + upper) / 2.0
+        return ParsedDimensionText(nominal, Tolerance(lower - nominal, upper - nominal))
     nominal = _nominal_from_text(normalized, measured_value)
 
     asymmetric = ASYMMETRIC_TOLERANCE_PATTERN.search(normalized)
@@ -219,7 +236,7 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
     general_tolerance = _find_general_tolerance(notes)
     dimensions: list[DimensionRequirement] = []
 
-    for dimension in analysis.dimensions:
+    for ordinal, dimension in enumerate(analysis.dimensions, start=1):
         parsed = parse_dimension_text(dimension.text_override, dimension.measurement)
         tolerance = parsed.tolerance or general_tolerance
         tolerance_source: str | None = None
@@ -245,6 +262,7 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
                 unit="Millimetres",
                 layer=dimension.layer,
                 source_text=dimension.text_override,
+                requirement_id=f"DIM-{ordinal:03d}",
             )
         )
 

@@ -68,6 +68,7 @@ class FinalReport:
     warnings: tuple[str, ...]
     limitations: tuple[str, ...]
     view_results: tuple[dict[str, object], ...] = ()
+    dimension_mappings: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return sections in the required report-reading order."""
@@ -95,6 +96,7 @@ class FinalReport:
                 "rule_source": "Background rule set",
             },
             "dimension_summary": list(self.dimension_summary),
+            "dimension_to_feature_mapping": list(self.dimension_mappings),
             "profile_summary": list(self.profile_summary),
             "ng_findings": list(self.ng_findings),
             "ai_assistance": self.ai_assistance,
@@ -130,6 +132,7 @@ def build_final_report(
     ai_assistance: dict[str, object] | None = None,
     generated_at_utc: str | None = None,
     view_results: Sequence[dict[str, object]] = (),
+    dimension_mappings: Sequence[dict[str, object]] = (),
 ) -> FinalReport:
     """Build one final report from results produced by the same CAD file pair."""
     if matching_result.drawing_source != judgement.drawing_source:
@@ -228,7 +231,8 @@ def build_final_report(
             raise ValueError("Assisted explanation judgement does not match deterministic judgement")
 
     view_ng = tuple({"category": "View", "view": item.get("view_id"), "check": item.get("detected_type"), "details": "; ".join(item.get("warnings", [])) or "Per-view comparison is NG."} for item in view_results if item.get("judgement") == NG)
-    overall = NG if view_ng else overall
+    mapping_ng = tuple({"category": "Feature mapping", "requirement": item.get("requirement_id"), "view": item.get("view_id"), "check": item.get("drawing_feature") or "Unmapped feature", "details": item.get("reason") or "Dimension mapping is NG."} for item in dimension_mappings if item.get("status") == NG)
+    overall = NG if view_ng or mapping_ng else overall
     return FinalReport(
         generated_at_utc=generated_at_utc or _now_utc(),
         overall_judgement=overall,
@@ -243,7 +247,7 @@ def build_final_report(
         general_tolerance_applied=matching_result.general_tolerances.applied,
         dimension_summary=dimension_summary,
         profile_summary=profile_summary,
-        ng_findings=dimension_ng + profile_ng + view_ng,
+        ng_findings=dimension_ng + profile_ng + view_ng + mapping_ng,
         ai_assistance=ai_assistance,
         detailed_dimension_evidence=detailed_dimensions,
         detailed_profile_evidence=detailed_profiles,
@@ -251,6 +255,7 @@ def build_final_report(
         warnings=tuple(dict.fromkeys((*judgement.warnings, *matching_result.warnings))),
         limitations=tuple(limitations),
         view_results=tuple(view_results),
+        dimension_mappings=tuple(dimension_mappings),
     )
 
 

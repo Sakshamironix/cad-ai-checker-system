@@ -1,6 +1,6 @@
 # CAD AI Checker
 
-## Milestone 14 — Advanced ring and curve recognition
+## Milestone 15 — Dimension-to-feature mapping and general-tolerance rule engine
 
 The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
 comparison so geometry from separate drawing views never combines. Unitless DXF values
@@ -10,9 +10,11 @@ standard views and centre-plane candidates for full sections. A view that cannot
 classified or compared produces NG, never REVIEW. AI assistance can explain evidence
 only and cannot change the deterministic OK/NG judgement.
 
-Milestone 14 reconstructs compatible split DXF arcs into circular curves, recognizes
-concentric annular profiles without double-counting nested circles, and extracts STEP
-toroidal faces for deterministic OD/ID ring matching. AI remains explanation-only.
+Milestone 15 normalizes DXF dimensions as traceable requirements, maps them to
+type-compatible STEP measurements, and records deterministic mapping evidence. Explicit
+drawing limits take priority. Background general-tolerance rules are versioned JSON and
+are never entered by an operator; an empty or inapplicable approved category produces NG.
+AI remains explanation-only.
 
 Permanent hosting is scheduled for Milestone 17; the Codespaces Streamlit URL is only
 available while its Codespace and process are running.
@@ -21,7 +23,7 @@ A browser-first engineering prototype that compares a 2D DXF drawing with a 3D S
 
 ## Current milestone
 
-Milestone 14 adds deterministic ring, curve, and torus recognition. The implemented workflow now provides:
+Milestone 15 adds deterministic mapping and tolerance resolution. The implemented workflow now provides:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
@@ -39,6 +41,10 @@ Milestone 14 adds deterministic ring, curve, and torus recognition. The implemen
 - Optional Gemini-primary explanations with automatic Groq fallback, based only on normalized comparison evidence and drawing text.
 - A hard boundary that prevents the explanation layer from changing deterministic OK/NG or evidence identity.
 - Split-arc reconstruction, concentric annular profile detection, and STEP torus extraction.
+- Normalized `DIM-###` requirements with explicit, limit, symmetric, asymmetric, and unilateral tolerance parsing.
+- STEP-geometry measurements for extents and likely through-hole diameters.
+- Deterministic unique feature mapping; missing or ambiguous feature mappings are NG.
+- Versioned `config/general_tolerances.json` validation and tolerance-priority resolution.
 
 ## Final report order
 
@@ -67,11 +73,16 @@ cad-ai-checker-system/
 │   ├── dxf_reader.py          # DXF analysis
 │   ├── drawing_interpreter.py # Drawing requirement normalization
 │   ├── feature_matcher.py     # Dimension/feature matching
+│   ├── dimension_mapping.py   # View-aware DXF-to-STEP mapping evidence
+│   ├── step_measurements.py   # Geometry-derived STEP measurements
+│   ├── tolerance_resolver.py  # Explicit/general tolerance priority
+│   ├── tolerance_validation.py# Background-rule configuration validation
 │   ├── profile_comparison.py  # Projected-shape comparison
 │   ├── overlay.py             # SVG comparison overlay
 │   ├── general_tolerances.py  # Background tolerance rule set
 │   ├── ai_assistant.py        # Guarded bilingual discrepancy assistance
 │   └── reporting.py           # JSON/PDF final reports
+├── config/general_tolerances.json # Versioned background tolerance rules
 ├── tests/                     # Automated synthetic CAD tests
 ├── environment.yml            # Conda CAD environment
 └── requirements.txt           # Pip dependencies

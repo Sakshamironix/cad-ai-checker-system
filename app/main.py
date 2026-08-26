@@ -27,6 +27,7 @@ from app.dashboard import build_dashboard_rows, build_summary_rows
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.feature_matcher import FeatureMatchingResult, match_features
+from app.dimension_mapping import DimensionMapping, map_dimensions
 from app.general_tolerances import PROVISIONAL_GENERAL_TOLERANCES
 from app.overlay import OverlayError, build_overlay_visualization
 from app.profile_comparison import (
@@ -44,8 +45,8 @@ from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
 APP_STAGE: Final = (
-    "Milestone 13 — DXF multi-view and section-view interpretation\n"
-    "マイルストーン13 — DXF複数図面・断面図の解釈"
+    "Milestone 15 — Dimension mapping and tolerance rule engine\n"
+    "マイルストーン15 — 寸法マッピング・公差ルールエンジン"
 )
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
@@ -567,6 +568,27 @@ def _render_feature_matches(result: FeatureMatchingResult) -> None:
         st.json(result.to_dict())
 
 
+def _render_dimension_mappings(mappings: tuple[DimensionMapping, ...]) -> None:
+    """Display Milestone 15 mapping evidence without adding a third judgement state."""
+    _section_heading(4, "Dimension mapping and tolerance evidence", "寸法マッピング・公差根拠")
+    st.dataframe(
+        [
+            {
+                "Dimension": item.requirement_id,
+                "View": item.view_id or "Unassigned",
+                "Drawing feature": item.drawing_feature or "—",
+                "STEP feature": item.step_feature_id or "—",
+                "Evidence": "; ".join(item.mapping_evidence) or item.reason or "—",
+                "Confidence": item.confidence,
+                "Result": item.status,
+            }
+            for item in mappings
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
 def _render_engineering_judgement(judgement: EngineeringJudgement) -> None:
     """Render the dimension-rule judgement without a third review state."""
     if judgement.decision == OK:
@@ -798,6 +820,7 @@ def _render_matching_uploader() -> None:
         detected_views = stored["detected_views"]
         classifications = stored["classifications"]
         view_results = stored["view_results"]
+        dimension_mappings = stored["dimension_mappings"]
     else:
         try:
             with st.spinner(_bilingual("Reading both CAD files and calculating the comparison...", "両方のCADファイルを読み込み、比較を計算しています…")):
@@ -821,6 +844,7 @@ def _render_matching_uploader() -> None:
                 detected_views = segment_views(dxf_analysis)
                 classifications = classify_views(dxf_analysis, detected_views)
                 view_results = compare_multiview_profiles(dxf_file.getvalue(), dxf_file.name, step_file.getvalue(), step_file.name, detected_views, classifications, profile_tolerance_mm)
+                dimension_mappings = map_dimensions(requirements, step_analysis)
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
             st.error(str(exc))
             return
@@ -836,12 +860,14 @@ def _render_matching_uploader() -> None:
             "detected_views": detected_views,
             "classifications": classifications,
             "view_results": view_results,
+            "dimension_mappings": dimension_mappings,
         }
         st.session_state.pop("cad_ai_explanation", None)
 
     st.divider()
     _section_heading(3, "Detected drawing views", "検出された図面ビュー")
     st.dataframe([{"View ID": item.view_id, "Type": item.view_type, "Geometry": next(view.geometry_count for view in detected_views if view.view_id == item.view_id), "Dimensions": next(len(view.dimension_indexes) for view in detected_views if view.view_id == item.view_id), "STEP match": item.selected_step_match or "—", "Result": item.judgement} for item in view_results], use_container_width=True, hide_index=True)
+    _render_dimension_mappings(dimension_mappings)
     _section_heading(3, "Judgement", "判定")
     overall_judgement = NG if NG in {judgement.decision, profile_result.judgement, *(item.judgement for item in view_results)} else OK
     if overall_judgement == OK:
@@ -942,6 +968,7 @@ def _render_matching_uploader() -> None:
         profile_result,
         overlay,
         view_results=tuple(item.to_dict() for item in view_results),
+        dimension_mappings=tuple(item.__dict__ for item in dimension_mappings),
     )
     local_explanation = build_deterministic_explanation(base_report, requirements.notes)
     stored_explanation = st.session_state.get("cad_ai_explanation")
@@ -1008,6 +1035,7 @@ def _render_matching_uploader() -> None:
         profile_result,
         overlay,
         view_results=tuple(item.to_dict() for item in view_results),
+        dimension_mappings=tuple(item.__dict__ for item in dimension_mappings),
         ai_assistance=active_explanation.to_dict(),
     )
     report_columns = st.columns(3)
