@@ -15,6 +15,9 @@ from app.runtime_limits import load_runtime_limits
 
 SUPPORTED_DXF_EXTENSIONS: Final = {".dxf"}
 MAX_DXF_FILE_SIZE_BYTES: Final = 25 * 1024 * 1024
+PROFILE_GEOMETRY_TYPES: Final = {
+    "LINE", "CIRCLE", "ARC", "LWPOLYLINE", "POLYLINE", "SPLINE", "ELLIPSE",
+}
 
 DXF_UNIT_NAMES: Final[dict[int, str]] = {
     0: "Unitless",
@@ -124,6 +127,8 @@ class DimensionFeature:
     style: str
     definition_point: Point2D | None = None
     text_position: Point2D | None = None
+    extension_line_start: Point2D | None = None
+    extension_line_end: Point2D | None = None
 
 
 @dataclass(frozen=True)
@@ -198,9 +203,13 @@ def _read_measurement(entity: object) -> float | None:
 
 
 def _drawing_extents(modelspace: object) -> DrawingExtents | None:
-    """Calculate model-space extents for entities supported by ezdxf."""
+    """Calculate extents from part/profile geometry, never annotations or title data."""
     try:
-        box = bbox.extents(modelspace, fast=True)
+        geometry = [
+            entity for entity in modelspace
+            if entity.dxftype() in PROFILE_GEOMETRY_TYPES
+        ]
+        box = bbox.extents(geometry, fast=True)
     except (DXFError, TypeError, ValueError):
         return None
 
@@ -325,6 +334,8 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
                     style=str(entity.dxf.dimstyle),
                     definition_point=_point(getattr(entity.dxf, "defpoint", None)),
                     text_position=_point(getattr(entity.dxf, "text_midpoint", None)),
+                    extension_line_start=_point(getattr(entity.dxf, "defpoint2", None)),
+                    extension_line_end=_point(getattr(entity.dxf, "defpoint3", None)),
                 )
             )
         elif entity_type in {"TEXT", "MTEXT"}:
