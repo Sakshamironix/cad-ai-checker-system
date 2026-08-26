@@ -9,7 +9,16 @@ import ezdxf
 import pytest
 from ezdxf import units
 
-from app.profile_comparison import NG, OK, compare_uploaded_profiles
+from app.profile_comparison import (
+    NG,
+    OK,
+    ProfilePrimitive,
+    _best_profile_deviation,
+    _all_points,
+    _outer_contour_points,
+    compare_uploaded_profiles,
+)
+from app.projection import Point2D
 
 
 def _write_ring_dxf(path: Path, outer_diameter: float, inner_diameter: float) -> None:
@@ -24,6 +33,34 @@ def _write_ring_dxf(path: Path, outer_diameter: float, inner_diameter: float) ->
 def _write_ring_step(path: Path) -> None:
     ring = cq.Workplane("XY").circle(25.0).circle(15.0).extrude(5.0)
     cq.exporters.export(ring, str(path), exportType="STEP")
+
+
+def test_reflected_orthographic_profile_has_zero_deviation() -> None:
+    """Front/rear orientation must not turn a valid hole pattern into an NG."""
+    drawing_outline = (
+        ((0, 0), (80, 0)), ((80, 0), (80, 60)),
+        ((80, 60), (0, 60)), ((0, 60), (0, 0)),
+    )
+    drawing = (
+        *(ProfilePrimitive("line", tuple(Point2D(*point) for point in edge)) for edge in drawing_outline),
+        ProfilePrimitive("feature", (Point2D(65, 10), Point2D(65, 45))),
+    )
+    mirrored_step = (
+        *(ProfilePrimitive("line", tuple(Point2D(*point) for point in edge)) for edge in drawing_outline),
+        ProfilePrimitive("feature", (Point2D(65, 50), Point2D(65, 15))),
+    )
+    assert _best_profile_deviation(_all_points(drawing), _all_points(mirrored_step)) == pytest.approx(0.0)
+
+
+def test_outer_contour_excludes_internal_projection_edges() -> None:
+    outer = (
+        ProfilePrimitive("line", (Point2D(0, 0), Point2D(80, 0))),
+        ProfilePrimitive("line", (Point2D(80, 0), Point2D(80, 10))),
+        ProfilePrimitive("line", (Point2D(80, 10), Point2D(0, 10))),
+        ProfilePrimitive("line", (Point2D(0, 10), Point2D(0, 0))),
+    )
+    internal = ProfilePrimitive("line", (Point2D(65, 0), Point2D(65, 10)))
+    assert len(_outer_contour_points((*outer, internal))) == len(_all_points(outer))
 
 
 def test_equal_ring_profiles_are_ok(tmp_path: Path) -> None:
