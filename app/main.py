@@ -1,4 +1,4 @@
-"""Milestone 16 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 17 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
 APP_STAGE: Final = (
-    "Milestone 16 — Pilot validation and runtime hardening\n"
-    "マイルストーン16 — パイロット検証・実行時強化"
+    "Milestone 17 — Visual CAD inspection evidence\n"
+    "マイルストーン17 — CAD可視検査エビデンス"
 )
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
@@ -205,7 +205,7 @@ def _render_hero() -> None:
         <section class="cad-hero">
           <div class="cad-hero-copy">
             <h1>CAD <span>AI</span> Checker</h1>
-            <p class="cad-stage">● Milestone 16 — Pilot validation and runtime hardening<br>マイルストーン16 — パイロット検証・実行時強化</p>
+            <p class="cad-stage">● Milestone 17 — Visual CAD inspection evidence<br>マイルストーン17 — CAD可視検査エビデンス</p>
             <p>
               Compare 2D engineering drawings with 3D CAD models using deterministic
               dimensional and projected-profile evidence, ordered OK/NG judgement,
@@ -765,35 +765,15 @@ def _render_matching_uploader() -> None:
             help=_bilingual("Prototype limit: 25 MB.", "試作版の上限：25 MB。"),
         )
 
-    _section_heading(2, "Set comparison options", "比較条件を設定")
-    option_columns = st.columns(1)
-    with option_columns[0]:
-        tolerance_application_label = st.radio(
-            _bilingual("General tolerance", "普通公差"),
-            options=[
-                _bilingual("Applied", "適用あり"),
-                _bilingual("Not applied", "適用なし"),
-            ],
-            horizontal=True,
-            help=_bilingual(
-                "The numerical rule set is controlled in the background. Explicit drawing "
-                "tolerances always take priority.",
-                "数値ルールセットはバックグラウンドで管理されます。図面の明示公差を常に優先します。",
-            ),
-        )
-    general_tolerance_applied = tolerance_application_label == _bilingual(
-        "Applied", "適用あり"
-    )
-    general_tolerances = PROVISIONAL_GENERAL_TOLERANCES.with_application(
-        general_tolerance_applied
-    )
-    profile_tolerance_mm = (
-        general_tolerances.profile_mm if general_tolerances.applied else None
-    )
+    _section_heading(2, "Comparison policy", "比較方針")
+    # The approved background rule set is always applied. Operators cannot
+    # disable it and accidentally turn exact, valid dimensions into NG rows.
+    general_tolerances = PROVISIONAL_GENERAL_TOLERANCES
+    profile_tolerance_mm = general_tolerances.profile_mm
     st.caption(
         _bilingual(
-            "General-tolerance values are maintained in the background rule set and are not operator inputs.",
-            "普通公差値はバックグラウンドのルールセットで管理され、作業者入力ではありません。",
+            "The approved background general-tolerance rule set is applied automatically. Explicit drawing tolerances take priority.",
+            "承認済みのバックグラウンド普通公差ルールセットが自動適用されます。図面の明示公差が優先されます。",
         )
     )
 
@@ -935,7 +915,7 @@ def _render_matching_uploader() -> None:
         use_container_width=True,
     )
 
-    _section_heading(5, "Visual comparison", "形状の可視比較")
+    _section_heading(5, "Visual inspection evidence", "可視検査エビデンス")
     overlay = None
     try:
         overlay = build_overlay_visualization(
@@ -983,6 +963,46 @@ def _render_matching_uploader() -> None:
             st.html(overlay.dxf_svg)
         with step_geometry_tab:
             st.html(overlay.step_svg)
+
+    st.markdown("#### What the checker processed / チェッカーが処理した形状")
+    st.caption(
+        _bilingual(
+            "Each panel contains only the isolated DXF view and the STEP projection actually used for its judgement.",
+            "各パネルには、判定に使用した分離済みDXFビューとSTEP投影のみを表示します。",
+        )
+    )
+    for view_item in view_results:
+        with st.expander(
+            f"{view_item.view_id} · {view_item.view_type} · {view_item.judgement}",
+            expanded=False,
+        ):
+            if view_item.result is None:
+                st.error("No comparable geometry was available for this view.")
+                for warning in view_item.warnings:
+                    st.warning(warning)
+                continue
+            try:
+                view_overlay = build_overlay_visualization(
+                    view_item.result,
+                    tolerance_mm=profile_tolerance_mm,
+                )
+            except OverlayError as exc:
+                st.warning(f"Visual evidence is unavailable for {view_item.view_id}: {exc}")
+                continue
+            evidence_columns = st.columns(4)
+            evidence_columns[0].metric("DXF view", view_item.view_id)
+            evidence_columns[1].metric("STEP projection", view_item.selected_step_match or "—")
+            evidence_columns[2].metric("DXF mismatch", view_overlay.dxf_mismatch_count)
+            evidence_columns[3].metric("STEP mismatch", view_overlay.step_mismatch_count)
+            combined_tab, dxf_tab, step_tab = st.tabs(
+                ["Comparison overlay", "What DXF sees", "What STEP sees"]
+            )
+            with combined_tab:
+                st.html(view_overlay.combined_svg)
+            with dxf_tab:
+                st.html(view_overlay.dxf_svg)
+            with step_tab:
+                st.html(view_overlay.step_svg)
 
     base_report = build_final_report(
         matching_result,
