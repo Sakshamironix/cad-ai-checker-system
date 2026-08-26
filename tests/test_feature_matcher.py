@@ -91,7 +91,8 @@ def test_match_basic_sizes_dimensions_and_hole_candidates() -> None:
     result = match_features(requirements, _step_analysis())
 
     assert result.unit_conversion_factor_to_mm == pytest.approx(1.0)
-    assert result.matched_count == 5
+    # The circle is evidence for the same hole already checked by its Ø dimension.
+    assert result.matched_count == 4
     assert any(
         match.requirement == "Linear dimension"
         and match.model_feature == "Bounding box Z"
@@ -106,6 +107,43 @@ def test_match_basic_sizes_dimensions_and_hole_candidates() -> None:
     )
     assert any(match.status == UNMATCHED_3D for match in result.matches)
     assert result.issue_count == 1
+
+
+def test_linear_hole_offsets_and_pitch_are_matched_from_step_axes() -> None:
+    step = StepAnalysis(
+        source_name="plate.step",
+        topology=TopologyCounts(1, 1, 10, 24, 16),
+        bounding_box=Vector3D(80.0, 10.0, 60.0),
+        volume=1.0,
+        surface_area=1.0,
+        center_of_mass=Vector3D(40.0, 5.0, -30.0),
+        planar_faces=6,
+        cylindrical_faces=2,
+        circular_edges=4,
+        outer_boundaries=8,
+        outer_boundary_length=1.0,
+        holes=(
+            HoleFeature(1, 4.0, 8.0, Vector3D(65.0, 0.0, -10.0), Vector3D(0.0, 1.0, 0.0)),
+            HoleFeature(2, 5.0, 10.0, Vector3D(65.0, 0.0, -45.0), Vector3D(0.0, 1.0, 0.0)),
+        ),
+        minimum=Vector3D(0.0, 0.0, -60.0),
+        maximum=Vector3D(80.0, 10.0, 0.0),
+    )
+    requirements = DrawingRequirements(
+        source_name="plate.dxf", units_name="Millimetres", drawing_size=None,
+        general_tolerance=None,
+        dimensions=(
+            _dimension(1, "linear", 15.0, Tolerance(-0.1, 0.1)),
+            _dimension(2, "linear", 35.0, Tolerance(-0.1, 0.1)),
+        ),
+        hole_candidates=(), notes=(), warnings=(),
+    )
+
+    result = match_features(requirements, step)
+
+    linear = [match for match in result.matches if match.requirement == "Linear dimension"]
+    assert [match.status for match in linear] == [MATCHED, MATCHED]
+    assert {match.model_value_mm for match in linear} == {15.0, 35.0}
 
 
 def test_out_of_tolerance_dimension_is_reported() -> None:
