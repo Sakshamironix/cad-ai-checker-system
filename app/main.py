@@ -839,23 +839,32 @@ def _render_matching_uploader() -> None:
                 dxf_analysis = analyze_dxf_bytes(dxf_file.getvalue(), dxf_file.name)
                 requirements = interpret_dxf_analysis(dxf_analysis)
                 step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
+                detected_views = segment_views(dxf_analysis)
+                classifications = classify_views(dxf_analysis, detected_views)
+                view_results = compare_multiview_profiles(
+                    dxf_file.getvalue(), dxf_file.name,
+                    step_file.getvalue(), step_file.name,
+                    detected_views, classifications, profile_tolerance_mm,
+                )
                 matching_result = match_features(
                     requirements,
                     step_analysis,
                     general_tolerances=general_tolerances,
                 )
                 judgement = evaluate_matching_result(matching_result)
-                profile_result = compare_uploaded_profiles(
-                    dxf_file.getvalue(),
-                    dxf_file.name,
-                    step_file.getvalue(),
-                    step_file.name,
-                    tolerance_mm=profile_tolerance_mm,
-                    requested_view="auto",
+                # Never combine separate orthographic views into one profile.
+                # Use the first comparable view for the report's detailed panel;
+                # all view judgements remain part of the final authority below.
+                profile_result = next(
+                    (item.result for item in view_results if item.result is not None),
+                    None,
                 )
-                detected_views = segment_views(dxf_analysis)
-                classifications = classify_views(dxf_analysis, detected_views)
-                view_results = compare_multiview_profiles(dxf_file.getvalue(), dxf_file.name, step_file.getvalue(), step_file.name, detected_views, classifications, profile_tolerance_mm)
+                if profile_result is None:
+                    profile_result = compare_uploaded_profiles(
+                        dxf_file.getvalue(), dxf_file.name,
+                        step_file.getvalue(), step_file.name,
+                        tolerance_mm=profile_tolerance_mm, requested_view="auto",
+                    )
                 dimension_mappings = map_dimensions(requirements, step_analysis)
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
             stage = "DXF reader" if isinstance(exc, DxfReaderError) else "STEP reader"
