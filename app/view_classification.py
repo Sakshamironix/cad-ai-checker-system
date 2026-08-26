@@ -19,6 +19,10 @@ def classify_view(analysis: DxfAnalysis, view: DrawingView) -> ViewClassificatio
     if analysis.hatch_count and any(x.entity_index in view.entity_indexes and x.entity_type == "HATCH" for x in analysis.entity_locations): evidence.append("HATCH entities detected")
     if len(evidence) >= 2: return ViewClassification(view.view_id, "Full section", tuple(evidence), "High")
     if any(DETAIL.search(text) for text in nearby): return ViewClassification(view.view_id, "Detail view", ("Detail label detected",), "Medium")
+    # A view with a connected outline plus at least one associated dimension is
+    # deterministically an orthographic drawing view even without a title label.
+    if view.geometry_count >= 2 and view.dimension_indexes:
+        return ViewClassification(view.view_id, "Orthographic view", ("Connected profile geometry", "Dimension extension lines assigned"), "Medium")
     return ViewClassification(view.view_id, "Unknown view", tuple(evidence) or ("No unambiguous view label",), "Low")
 
 def classify_views(analysis: DxfAnalysis, views: tuple[DrawingView, ...]) -> tuple[ViewClassification, ...]: return tuple(classify_view(analysis, view) for view in views)
