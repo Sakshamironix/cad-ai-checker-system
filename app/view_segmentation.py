@@ -19,7 +19,9 @@ def _gap(a: EntityLocation, b: EntityLocation) -> float:
 
 def segment_views(analysis: DxfAnalysis, gap_mm: float = 12.0) -> tuple[DrawingView, ...]:
     """Cluster nearby geometry; annotations are assigned only after geometry is isolated."""
-    annotations = {"DIMENSION", "TEXT", "MTEXT"}
+    # INSERT commonly contains the rendered block for a DIMENSION. It must not
+    # bridge two independent views during geometric clustering.
+    annotations = {"DIMENSION", "TEXT", "MTEXT", "INSERT"}
     geometric = [item for item in analysis.entity_locations if item.entity_type not in annotations]
     if not geometric: return ()
     clusters: list[list[EntityLocation]] = []
@@ -35,8 +37,23 @@ def segment_views(analysis: DxfAnalysis, gap_mm: float = 12.0) -> tuple[DrawingV
         entity_indexes = {x.entity_index for x in cluster}
         dimensions = []
         for dimension in analysis.dimensions:
-            point = dimension.text_position or dimension.definition_point
-            if point and minimum.x-gap_mm <= point.x <= maximum.x+gap_mm and minimum.y-gap_mm <= point.y <= maximum.y+gap_mm:
+            anchors = (
+                dimension.extension_line_start,
+                dimension.extension_line_end,
+                dimension.text_position,
+                dimension.definition_point,
+            )
+            # Extension-line origins are the strongest evidence. Text and the
+            # dimension-line position are used only when extension data is absent.
+            extension_anchors = anchors[:2]
+            candidates = tuple(point for point in extension_anchors if point is not None)
+            if not candidates:
+                candidates = tuple(point for point in anchors[2:] if point is not None)
+            if candidates and all(
+                minimum.x-gap_mm <= point.x <= maximum.x+gap_mm
+                and minimum.y-gap_mm <= point.y <= maximum.y+gap_mm
+                for point in candidates
+            ):
                 dimensions.append(dimension.entity_index); entity_indexes.add(dimension.entity_index)
         views.append(DrawingView(f"VIEW-{number:02d}", tuple(sorted(entity_indexes)), minimum, maximum, tuple(dimensions), len(cluster)))
     return tuple(views)
