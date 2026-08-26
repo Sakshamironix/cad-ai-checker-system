@@ -218,11 +218,42 @@ def compare_multiview_profiles(dxf_data: bytes, dxf_filename: str, step_data: by
         candidates = [item.projection for item in sections] if "section" in kind.lower() else list(projections)
         if kind == "Unknown view":
             results.append(ViewProfileResult(view.view_id, kind, None, None, ("NG — Drawing view could not be deterministically classified.",))); continue
-        projection=min(candidates, key=lambda item: _best_profile_deviation(_all_points(primitives), _all_points(item.primitives)))
+        projection=min(
+            candidates,
+            key=lambda item: _projection_selection_score(primitives, item),
+        )
         result=compare_profile_geometry(primitives, projection, tolerance_mm, drawing_source=dxf_filename, model_source=step_filename)
         match = next((item.plane for item in sections if item.projection == projection), projection.view)
         results.append(ViewProfileResult(view.view_id, kind, match, result, ()))
     return tuple(results)
+
+
+def _projection_selection_score(
+    dxf_primitives: Sequence[ProfilePrimitive],
+    projection: StepProjection,
+) -> tuple[float, int, float]:
+    """Rank projections by measurable view evidence before fine profile deviation.
+
+    A thin side projection can have a deceptively small Hausdorff distance to a
+    front view. Width, height and visible-circle count are therefore stronger
+    selection evidence than the final edge deviation.
+    """
+    dxf_points = _all_points(dxf_primitives)
+    minimum_x, minimum_y, maximum_x, maximum_y = _bounds(dxf_points)
+    dxf_width = maximum_x - minimum_x
+    dxf_height = maximum_y - minimum_y
+    same = abs(projection.width - dxf_width) + abs(projection.height - dxf_height)
+    rotated = abs(projection.height - dxf_width) + abs(projection.width - dxf_height)
+    dxf_circles = sum(
+        primitive.kind == "circle" and primitive.radius is not None
+        for primitive in dxf_primitives
+    )
+    circle_difference = abs(projection.circle_count - dxf_circles)
+    return (
+        min(same, rotated),
+        circle_difference,
+        _best_profile_deviation(dxf_points, _all_points(projection.primitives)),
+    )
 
 
 def _all_points(primitives: Iterable[ProfilePrimitive | object]) -> np.ndarray:
