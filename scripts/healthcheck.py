@@ -2,6 +2,11 @@
 """Exit non-zero when the offline pilot health check fails."""
 from __future__ import annotations
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from app.health import check_health
 
 status = check_health()
