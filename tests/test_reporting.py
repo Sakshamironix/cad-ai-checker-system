@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -126,6 +127,32 @@ def test_pdf_report_is_a_nonempty_pdf() -> None:
 
     assert pdf.startswith(b"%PDF-")
     assert len(pdf) > 3000
+    assert b"%%EOF" in pdf[-32:]
+
+
+def test_pdf_report_renders_view_and_mapping_findings_without_rule_ids() -> None:
+    report = replace(
+        _report(),
+        ng_findings=(
+            {
+                "category": "View",
+                "view": "VIEW-01",
+                "check": "Unknown view",
+                "details": "No deterministic STEP match.",
+            },
+            {
+                "category": "Feature mapping",
+                "requirement": "DIM-01",
+                "view": "VIEW-01",
+                "check": "Unmapped feature",
+                "details": "Dimension mapping is NG.",
+            },
+        ),
+    )
+
+    pdf = report.to_pdf_bytes()
+
+    assert pdf.startswith(b"%PDF-")
     assert b"%%EOF" in pdf[-32:]
 
 
