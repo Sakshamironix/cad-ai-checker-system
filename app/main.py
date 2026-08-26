@@ -38,6 +38,8 @@ from app.profile_comparison import (
 from app.reporting import build_final_report
 from app.view_segmentation import segment_views
 from app.view_classification import classify_views
+from app.curve_reconstruction import reconstruct_circles
+from app.ring_features import recognize_ring_features
 from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
@@ -412,6 +414,12 @@ def _render_dxf_results(
     summary_columns[1].metric("Units", analysis.units_name)
     summary_columns[2].metric("Layers", len(analysis.layers))
     summary_columns[3].metric("Entities", analysis.entity_counts.total)
+
+    reconstructed = reconstruct_circles(analysis.circles, analysis.arcs)
+    rings = recognize_ring_features(reconstructed)
+    if rings:
+        st.subheader("Recognized annular profiles")
+        st.dataframe([item.to_dict() for item in rings], hide_index=True, use_container_width=True)
 
     st.subheader("Drawing extents")
     if analysis.extents is None:

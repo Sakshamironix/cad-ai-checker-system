@@ -1,6 +1,6 @@
 # CAD AI Checker
 
-## Milestone 13 — Multi-view DXF interpretation
+## Milestone 14 — Advanced ring and curve recognition
 
 The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
 comparison so geometry from separate drawing views never combines. Unitless DXF values
@@ -10,14 +10,18 @@ standard views and centre-plane candidates for full sections. A view that cannot
 classified or compared produces NG, never REVIEW. AI assistance can explain evidence
 only and cannot change the deterministic OK/NG judgement.
 
-Initial section support covers labelled and hatched full sections. Offset, revolved and
-non-orthogonal sections remain explicitly unsupported for this milestone.
+Milestone 14 reconstructs compatible split DXF arcs into circular curves, recognizes
+concentric annular profiles without double-counting nested circles, and extracts STEP
+toroidal faces for deterministic OD/ID ring matching. AI remains explanation-only.
+
+Permanent hosting is scheduled for Milestone 17; the Codespaces Streamlit URL is only
+available while its Codespace and process are running.
 
 A browser-first engineering prototype that compares a 2D DXF drawing with a 3D STEP/STP model. Development and trials run in GitHub Codespaces through a Streamlit dashboard.
 
 ## Current milestone
 
-Milestone 12 adds a guarded dual-provider AI trial. The implemented workflow now provides:
+Milestone 14 adds deterministic ring, curve, and torus recognition. The implemented workflow now provides:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
@@ -34,6 +38,7 @@ Milestone 12 adds a guarded dual-provider AI trial. The implemented workflow now
 - A bilingual local explanation for every completed check, including possible causes and recommended verification steps.
 - Optional Gemini-primary explanations with automatic Groq fallback, based only on normalized comparison evidence and drawing text.
 - A hard boundary that prevents the explanation layer from changing deterministic OK/NG or evidence identity.
+- Split-arc reconstruction, concentric annular profile detection, and STEP torus extraction.
 
 ## Final report order
 
