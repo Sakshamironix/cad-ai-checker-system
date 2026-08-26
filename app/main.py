@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 from pathlib import Path
 from typing import Final
 
@@ -39,7 +40,7 @@ from app.profile_comparison import (
     compare_multiview_profiles,
 )
 from app.reporting import build_final_report
-from app.view_segmentation import segment_views
+from app.view_segmentation import assign_dimension_view, segment_views
 from app.view_classification import classify_views
 from app.curve_reconstruction import reconstruct_circles
 from app.ring_features import recognize_ring_features
@@ -821,6 +822,18 @@ def _render_matching_uploader() -> None:
                 step_analysis = analyze_step_bytes(step_file.getvalue(), step_file.name)
                 detected_views = segment_views(dxf_analysis)
                 classifications = classify_views(dxf_analysis, detected_views)
+                requirements = replace(
+                    requirements,
+                    dimensions=tuple(
+                        replace(
+                            requirement,
+                            view_id=assign_dimension_view(
+                                dxf_analysis, detected_views, requirement.entity_index
+                            ),
+                        )
+                        for requirement in requirements.dimensions
+                    ),
+                )
                 view_results = compare_multiview_profiles(
                     dxf_file.getvalue(), dxf_file.name,
                     step_file.getvalue(), step_file.name,
