@@ -13,4 +13,8 @@ def generate_step_sections(data: bytes, filename: str) -> tuple[StepSection, ...
     Offset and non-orthogonal cuts are intentionally not inferred in Milestone 13.
     """
     names = {"top": "Z-centre section", "front": "Y-centre section", "right": "X-centre section"}
-    return tuple(StepSection(names[p.view], p) for p in project_step_bytes(data, filename))
+    return tuple(
+        StepSection(names[p.view], p)
+        for p in project_step_bytes(data, filename)
+        if p.view in names
+    )
