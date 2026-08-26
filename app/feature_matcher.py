@@ -236,6 +236,21 @@ def _match_overall_size(
         ("Overall drawing width", requirements.drawing_size.width * factor),
         ("Overall drawing height", requirements.drawing_size.height * factor),
     ]
+    # Whole-sheet extents are useful only for a single orthographic outline.
+    # If one value cannot be reconciled with a distinct model axis, dimensions
+    # or another drawing view have enlarged the drawing and this check is skipped.
+    tolerance = general_tolerances.linear_mm
+    candidates = [
+        _closest_available(value_mm, axes, set())
+        for _, value_mm in drawing_sizes
+    ]
+    if (
+        any(candidate is None for candidate in candidates)
+        or candidates[0][0] == candidates[1][0]
+        or any(abs(candidate[2] - value_mm) > tolerance for candidate, (_, value_mm) in zip(candidates, drawing_sizes, strict=True))
+    ):
+        return []
+
     used_axes: set[int] = set()
     matches: list[FeatureMatch] = []
     for label, value_mm in drawing_sizes:
@@ -290,13 +305,13 @@ def _match_linear_dimensions(
     factor: float,
     general_tolerances: GeneralToleranceSet,
 ) -> list[FeatureMatch]:
-    """Match linear dimensions to unique 3D bounding-box axes."""
+    """Match linear dimensions to extents and deterministic hole relationships."""
     axes = [
         (0, "Bounding box X", step.bounding_box.x),
         (1, "Bounding box Y", step.bounding_box.y),
         (2, "Bounding box Z", step.bounding_box.z),
     ]
-    used_axes: set[int] = set()
+    candidates = list(axes) + _linear_relationship_candidates(step)
     matches: list[FeatureMatch] = []
 
     for dimension in dimensions:
@@ -314,7 +329,9 @@ def _match_linear_dimensions(
             )
             continue
         nominal_mm = dimension.nominal_value * factor
-        candidate = _closest_available(nominal_mm, axes, used_axes)
+        # Reuse is intentional: drawings often repeat an overall extent and a
+        # local edge-to-feature distance with the same nominal value.
+        candidate = _closest_available(nominal_mm, candidates, set())
         if candidate is None:
             matches.append(
                 _no_candidate(
@@ -327,7 +344,6 @@ def _match_linear_dimensions(
             )
             continue
         axis_index, axis_label, axis_value = candidate
-        used_axes.add(axis_index)
         converted_tolerance = _converted_tolerance(
             dimension.tolerance,
             factor,
@@ -360,10 +376,37 @@ def _match_linear_dimensions(
                 upper_deviation_mm=upper,
                 tolerance_source=dimension.tolerance_source or fallback_source,
                 confidence="medium",
-                reason_prefix="Closest unique 3D bounding-box axis",
+                reason_prefix="Closest deterministic STEP extent or feature relationship",
             )
         )
     return matches
+
+
+def _linear_relationship_candidates(step: StepAnalysis) -> list[tuple[int, str, float]]:
+    """Derive edge offsets and hole pitches from STEP cylinder axes in millimetres."""
+    if step.minimum is None or step.maximum is None:
+        return []
+    lower = (step.minimum.x, step.minimum.y, step.minimum.z)
+    upper = (step.maximum.x, step.maximum.y, step.maximum.z)
+    candidates: list[tuple[int, str, float]] = []
+    index = 10
+    centers = []
+    for hole_number, hole in enumerate(step.holes, start=1):
+        if hole.center is None:
+            continue
+        coordinates = (hole.center.x, hole.center.y, hole.center.z)
+        centers.append(coordinates)
+        for axis_name, coordinate, minimum, maximum in zip(("X", "Y", "Z"), coordinates, lower, upper, strict=True):
+            for side, value in (("minimum", coordinate - minimum), ("maximum", maximum - coordinate)):
+                if value > 1e-7:
+                    candidates.append((index, f"Hole {hole_number} centre to {axis_name}-{side} edge", value)); index += 1
+    for first in range(len(centers)):
+        for second in range(first + 1, len(centers)):
+            for axis_name, first_value, second_value in zip(("X", "Y", "Z"), centers[first], centers[second], strict=True):
+                pitch = abs(second_value - first_value)
+                if pitch > 1e-7:
+                    candidates.append((index, f"Hole {first + 1}-{second + 1} {axis_name} pitch", pitch)); index += 1
+    return candidates
 
 
 def _match_cylindrical_dimensions(
@@ -461,6 +504,7 @@ def _match_circle_candidates(
     factor: float,
     general_tolerances: GeneralToleranceSet,
     referenced_holes: set[int],
+    dimension_diameters_mm: tuple[float, ...],
 ) -> list[FeatureMatch]:
     """Match DXF circles with likely STEP holes using diameter only."""
     candidates = [
@@ -472,6 +516,10 @@ def _match_circle_candidates(
 
     for circle in requirements.hole_candidates:
         diameter_mm = circle.diameter * factor
+        # A visible circle and its associated diameter DIMENSION are one drawing
+        # feature. The dimensional requirement is the authoritative check.
+        if any(abs(diameter_mm - value) <= 1e-7 for value in dimension_diameters_mm):
+            continue
         candidate = _closest_available(diameter_mm, candidates, used_for_circles)
         if candidate is None:
             matches.append(
@@ -574,8 +622,8 @@ def match_features(
 
     factor = UNIT_TO_MILLIMETRES.get(requirements.units_name)
     warnings = [
-        "Hole matching currently uses diameter or radius only; center position and axis are not yet compared.",
-        "Drawing extents are matched with low confidence because annotations can enlarge DXF extents.",
+        "DXF annotations are excluded from geometry extents and profile comparisons.",
+        "Linear edge offsets and hole pitches are compared when STEP cylinder axes are available.",
     ]
     if factor is None:
         warnings.append(
@@ -611,6 +659,12 @@ def match_features(
             referenced_holes,
         )
     )
+    dimension_diameters_mm = tuple(
+        dimension.nominal_value * factor
+        for dimension in requirements.dimensions
+        if dimension.classification in {"diameter", "radius"}
+        and dimension.nominal_value is not None
+    )
     matches.extend(
         _match_circle_candidates(
             requirements,
@@ -618,6 +672,7 @@ def match_features(
             factor,
             general_tolerances,
             referenced_holes,
+            dimension_diameters_mm,
         )
     )
     matches.extend(_unsupported_dimensions(requirements.dimensions, factor))
