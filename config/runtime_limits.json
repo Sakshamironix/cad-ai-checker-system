@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "max_dxf_bytes": 26214400,
+  "max_step_bytes": 26214400,
+  "max_dxf_entities": 100000,
+  "max_step_faces": 100000,
+  "max_step_edges": 250000,
+  "cad_processing_timeout_seconds": 120,
+  "ai_request_timeout_seconds": 45,
+  "max_report_requests_per_run": 2
+}

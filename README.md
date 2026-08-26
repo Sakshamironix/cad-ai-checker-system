@@ -1,6 +1,6 @@
 # CAD AI Checker
 
-## Milestone 15 — Dimension-to-feature mapping and general-tolerance rule engine
+## Milestone 16 — End-to-end validation and pilot hardening
 
 The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
 comparison so geometry from separate drawing views never combines. Unitless DXF values
@@ -10,11 +10,10 @@ standard views and centre-plane candidates for full sections. A view that cannot
 classified or compared produces NG, never REVIEW. AI assistance can explain evidence
 only and cannot change the deterministic OK/NG judgement.
 
-Milestone 15 normalizes DXF dimensions as traceable requirements, maps them to
-type-compatible STEP measurements, and records deterministic mapping evidence. Explicit
-drawing limits take priority. Background general-tolerance rules are versioned JSON and
-are never entered by an operator; an empty or inapplicable approved category produces NG.
-AI remains explanation-only.
+Milestone 16 validates and hardens the completed deterministic workflow for pilot trials.
+It adds configurable runtime limits, controlled bilingual errors, temporary-file cleanup,
+safe diagnostics, report validation, an offline health check, and a restartable container.
+Permanent public hosting remains Milestone 17.
 
 Permanent hosting is scheduled for Milestone 17; the Codespaces Streamlit URL is only
 available while its Codespace and process are running.
@@ -23,7 +22,7 @@ A browser-first engineering prototype that compares a 2D DXF drawing with a 3D S
 
 ## Current milestone
 
-Milestone 15 adds deterministic mapping and tolerance resolution. The implemented workflow now provides:
+Milestone 16 adds pilot validation and hardening. The implemented workflow now provides:
 
 - STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
 - DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
@@ -45,6 +44,10 @@ Milestone 15 adds deterministic mapping and tolerance resolution. The implemente
 - STEP-geometry measurements for extents and likely through-hole diameters.
 - Deterministic unique feature mapping; missing or ambiguous feature mappings are NG.
 - Versioned `config/general_tolerances.json` validation and tolerance-priority resolution.
+- Versioned `config/runtime_limits.json` for upload, topology, time and report limits.
+- Container startup with a non-root user, health check and restart policy.
+- Controlled bilingual DXF/STEP error messages with safe recovery guidance.
+- Offline health checks that verify dependencies, configuration and temporary storage without calling AI providers.
 
 ## Final report order
 
@@ -77,6 +80,10 @@ cad-ai-checker-system/
 │   ├── step_measurements.py   # Geometry-derived STEP measurements
 │   ├── tolerance_resolver.py  # Explicit/general tolerance priority
 │   ├── tolerance_validation.py# Background-rule configuration validation
+│   ├── runtime_limits.py      # Pilot processing-limit validation
+│   ├── diagnostics.py         # Safe timing diagnostics
+│   ├── error_catalog.py       # Bilingual controlled errors
+│   └── health.py              # Offline readiness check
 │   ├── profile_comparison.py  # Projected-shape comparison
 │   ├── overlay.py             # SVG comparison overlay
 │   ├── general_tolerances.py  # Background tolerance rule set
@@ -107,6 +114,26 @@ After calculation, the dashboard displays:
 - Bilingual discrepancy explanation with possible causes and recommended checks.
 - Detailed comparison evidence.
 - JSON and PDF report download buttons.
+
+## Milestone 16 pilot container
+
+Build and start the restartable pilot container locally:
+
+```bash
+docker compose up --build
+```
+
+The dashboard is then available on `http://localhost:8501`. Store `GEMINI_API_KEY` and
+`GROQ_API_KEY` only in the host or deployment secret store; never add them to files or
+images. Verify the container without calling AI providers:
+
+```bash
+docker compose exec cad-ai-checker python scripts/healthcheck.py
+```
+
+For rollback, deploy the previously verified image tag, run the health check above, and
+record the restored Git commit plus the runtime and tolerance-rule versions. Do not include
+uploads or secrets in images, logs, reports or backups. Permanent HTTPS hosting is Milestone 17.
 
 ## Optional dual-provider AI enhancement
 

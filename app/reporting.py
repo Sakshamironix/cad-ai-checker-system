@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from html import escape
 from io import BytesIO
 import json
+import math
 from typing import Final, Sequence
 
 from reportlab.lib import colors
@@ -32,6 +33,7 @@ from app.profile_comparison import ProfileComparisonResult
 
 
 REPORT_SCHEMA_VERSION: Final = "1.0"
+APPLICATION_VERSION: Final = "CAD AI Checker v0.16.0-pilot"
 NOT_GOOD_LABEL: Final = "NG (Not Good)"
 
 
@@ -80,6 +82,7 @@ class FinalReport:
             },
             "report_information": {
                 "schema_version": REPORT_SCHEMA_VERSION,
+                "application_version": APPLICATION_VERSION,
                 "generated_at_utc": self.generated_at_utc,
                 "report_type": "CAD drawing-to-model comparison",
             },
@@ -121,6 +124,24 @@ class FinalReport:
     def to_pdf_bytes(self) -> bytes:
         """Render the complete report as an ordered, multi-page PDF."""
         return _render_pdf(self)
+
+
+def validate_report_payload(payload: dict[str, object]) -> None:
+    """Validate pilot report essentials and reject non-finite data before sharing."""
+    required = ("judgement", "report_information", "files", "millimetre_units", "general_tolerance", "dimension_summary", "profile_summary", "ng_findings", "warnings", "limitations")
+    if any(key not in payload for key in required):
+        raise ValueError("Report is missing required pilot sections.")
+    if payload["millimetre_units"] != {"unit": "mm", "dxf_unitless_policy": "Unitless DXF values are treated as millimetres."}:
+        raise ValueError("Report must declare millimetre units.")
+    if not isinstance(payload["warnings"], list) or not isinstance(payload["limitations"], list):
+        raise ValueError("Report warnings and limitations must be lists.")
+    def walk(value: object) -> None:
+        if isinstance(value, float) and not math.isfinite(value): raise ValueError("Report contains a non-finite number.")
+        if isinstance(value, dict):
+            for nested in value.values(): walk(nested)
+        elif isinstance(value, list):
+            for nested in value: walk(nested)
+    walk(payload)
 
 
 def build_final_report(

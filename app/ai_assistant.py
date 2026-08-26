@@ -14,6 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.reporting import FinalReport
+from app.runtime_limits import load_runtime_limits
 
 
 DEFAULT_GEMINI_MODEL: Final = "gemini-3.5-flash"
@@ -286,7 +287,7 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, object]) ->
         method="POST",
     )
     try:
-        with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        with urlopen(request, timeout=load_runtime_limits().ai_request_timeout_seconds) as response:
             response_body = response.read().decode("utf-8")
     except HTTPError as exc:
         raise AIResponseError(f"provider HTTP request failed with status {exc.code}") from exc
@@ -528,6 +529,7 @@ def generate_ai_explanation(
         except json.JSONDecodeError:
             failures.append(f"{provider_name}: invalid structured JSON")
         except Exception as exc:
-            failures.append(f"{provider_name}: {exc}")
+            # Do not propagate provider exception text: it can contain request metadata.
+            failures.append(f"{provider_name}: {type(exc).__name__}")
 
     raise AIResponseError("All configured AI providers failed. " + " | ".join(failures))

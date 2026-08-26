@@ -11,6 +11,7 @@ import cadquery as cq
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Cylinder, GeomAbs_Plane, GeomAbs_Torus
 from OCP.TopAbs import TopAbs_REVERSED
+from app.runtime_limits import load_runtime_limits
 
 SUPPORTED_STEP_EXTENSIONS: Final = {".step", ".stp"}
 MAX_STEP_FILE_SIZE_BYTES: Final = 25 * 1024 * 1024
@@ -103,8 +104,9 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
         raise StepReaderError(f"STEP file was not found: {path}")
     if path.stat().st_size == 0:
         raise StepReaderError("The uploaded STEP file is empty.")
-    if path.stat().st_size > MAX_STEP_FILE_SIZE_BYTES:
-        raise StepReaderError("The STEP file exceeds the 25 MB prototype limit.")
+    limits = load_runtime_limits()
+    if path.stat().st_size > limits.max_step_bytes:
+        raise StepReaderError("The STEP file exceeds the configured pilot upload limit.")
 
     try:
         imported = cq.importers.importStep(str(path))
@@ -120,6 +122,8 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
     faces = shape.Faces()
     edges = shape.Edges()
     vertices = shape.Vertices()
+    if len(faces) > limits.max_step_faces or len(edges) > limits.max_step_edges:
+        raise StepReaderError("The STEP topology exceeds the configured pilot processing limit.")
     bounding_box = shape.BoundingBox()
     center = shape.Center()
 
@@ -199,8 +203,8 @@ def analyze_step_bytes(data: bytes, filename: str) -> StepAnalysis:
     suffix = _validate_filename(filename)
     if not data:
         raise StepReaderError("The uploaded STEP file is empty.")
-    if len(data) > MAX_STEP_FILE_SIZE_BYTES:
-        raise StepReaderError("The STEP file exceeds the 25 MB prototype limit.")
+    if len(data) > load_runtime_limits().max_step_bytes:
+        raise StepReaderError("The STEP file exceeds the configured pilot upload limit.")
 
     temporary_path: Path | None = None
     try:

@@ -1,0 +1,10 @@
+services:
+  cad-ai-checker:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      PORT: "8501"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    restart: unless-stopped

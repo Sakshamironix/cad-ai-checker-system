@@ -19,6 +19,9 @@ venv/
 # Temporary uploads: never commit customer CAD files
 uploads/*
 !uploads/.gitkeep
+runtime/
+reports/
+*.log
 *.step
 *.stp
 *.iges

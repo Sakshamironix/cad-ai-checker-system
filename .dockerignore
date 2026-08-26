@@ -1,0 +1,14 @@
+.git
+.github
+.pytest_cache
+__pycache__
+*.py[cod]
+.env
+.venv
+venv
+uploads/*
+test_data/*
+*.dxf
+*.step
+*.stp
+*.pdf

@@ -1,4 +1,4 @@
-"""Milestone 12 Streamlit entry point for the CAD AI Checker."""
+"""Milestone 16 Streamlit entry point for the CAD AI Checker."""
 
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ from app.comparison_rules import (
 from app.dashboard import build_dashboard_rows, build_summary_rows
 from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
+from app.error_catalog import reader_error
+from app.health import APP_VERSION
 from app.feature_matcher import FeatureMatchingResult, match_features
 from app.dimension_mapping import DimensionMapping, map_dimensions
 from app.general_tolerances import PROVISIONAL_GENERAL_TOLERANCES
@@ -45,8 +47,8 @@ from app.step_reader import StepAnalysis, StepReaderError, analyze_step_bytes
 
 APP_NAME: Final = "CAD AI Checker"
 APP_STAGE: Final = (
-    "Milestone 15 — Dimension mapping and tolerance rule engine\n"
-    "マイルストーン15 — 寸法マッピング・公差ルールエンジン"
+    "Milestone 16 — Pilot validation and runtime hardening\n"
+    "マイルストーン16 — パイロット検証・実行時強化"
 )
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
 
@@ -194,7 +196,7 @@ def _render_hero() -> None:
         <section class="cad-hero">
           <div class="cad-hero-copy">
             <h1>CAD <span>AI</span> Checker</h1>
-            <p class="cad-stage">● Milestone 12 — Visual dashboard + dual-provider AI<br>マイルストーン12 — ビジュアルダッシュボード・2系統AI</p>
+            <p class="cad-stage">● Milestone 16 — Pilot validation and runtime hardening<br>マイルストーン16 — パイロット検証・実行時強化</p>
             <p>
               Compare 2D engineering drawings with 3D CAD models using deterministic
               dimensional and projected-profile evidence, ordered OK/NG judgement,
@@ -235,6 +237,7 @@ def get_app_status() -> dict[str, str]:
     """Return the visible application state used by the UI and setup test."""
     return {
         "application": APP_NAME,
+        "version": APP_VERSION,
         "stage": APP_STAGE,
         "capability": (
             "Guarded bilingual discrepancy explanations after deterministic OK or NG\n"
@@ -695,7 +698,7 @@ def _render_step_uploader() -> None:
         with st.spinner("Reading STEP geometry with OpenCASCADE..."):
             analysis = analyze_step_bytes(uploaded_file.getvalue(), uploaded_file.name)
     except StepReaderError as exc:
-        st.error(str(exc))
+        error = reader_error("STEP reader", str(exc)); st.error(f"{error.error_id}: {error.message_en}\n\n{error.message_ja}\n\n{error.recovery_en}")
         return
 
     _render_step_results(analysis)
@@ -724,7 +727,7 @@ def _render_dxf_uploader() -> None:
             analysis = analyze_dxf_bytes(uploaded_file.getvalue(), uploaded_file.name)
             requirements = interpret_dxf_analysis(analysis)
     except DxfReaderError as exc:
-        st.error(str(exc))
+        error = reader_error("DXF reader", str(exc)); st.error(f"{error.error_id}: {error.message_en}\n\n{error.message_ja}\n\n{error.recovery_en}")
         return
 
     _render_dxf_results(analysis, requirements)
@@ -846,7 +849,8 @@ def _render_matching_uploader() -> None:
                 view_results = compare_multiview_profiles(dxf_file.getvalue(), dxf_file.name, step_file.getvalue(), step_file.name, detected_views, classifications, profile_tolerance_mm)
                 dimension_mappings = map_dimensions(requirements, step_analysis)
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
-            st.error(str(exc))
+            stage = "DXF reader" if isinstance(exc, DxfReaderError) else "STEP reader"
+            error = reader_error(stage, str(exc)); st.error(f"{error.error_id}: {error.message_en}\n\n{error.message_ja}\n\n{error.recovery_en}")
             return
 
         st.session_state["cad_check_result"] = {

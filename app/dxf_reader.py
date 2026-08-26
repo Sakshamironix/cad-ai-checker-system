@@ -11,6 +11,7 @@ from typing import Final
 import ezdxf
 from ezdxf import bbox
 from ezdxf.lldxf.const import DXFError
+from app.runtime_limits import load_runtime_limits
 
 SUPPORTED_DXF_EXTENSIONS: Final = {".dxf"}
 MAX_DXF_FILE_SIZE_BYTES: Final = 25 * 1024 * 1024
@@ -246,8 +247,9 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
         raise DxfReaderError(f"DXF file was not found: {path}")
     if path.stat().st_size == 0:
         raise DxfReaderError("The uploaded DXF file is empty.")
-    if path.stat().st_size > MAX_DXF_FILE_SIZE_BYTES:
-        raise DxfReaderError("The DXF file exceeds the 25 MB prototype limit.")
+    limits = load_runtime_limits()
+    if path.stat().st_size > limits.max_dxf_bytes:
+        raise DxfReaderError("The DXF file exceeds the configured pilot upload limit.")
 
     try:
         document = ezdxf.readfile(path)
@@ -256,6 +258,8 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
         raise DxfReaderError(f"ezdxf could not read this DXF file: {exc}") from exc
 
     entities = list(modelspace)
+    if len(entities) > limits.max_dxf_entities:
+        raise DxfReaderError("The DXF entity count exceeds the configured pilot processing limit.")
     type_counts = Counter(entity.dxftype() for entity in entities)
     supported_types = {
         "LINE",
@@ -377,8 +381,8 @@ def analyze_dxf_bytes(data: bytes, filename: str) -> DxfAnalysis:
     suffix = _validate_filename(filename)
     if not data:
         raise DxfReaderError("The uploaded DXF file is empty.")
-    if len(data) > MAX_DXF_FILE_SIZE_BYTES:
-        raise DxfReaderError("The DXF file exceeds the 25 MB prototype limit.")
+    if len(data) > load_runtime_limits().max_dxf_bytes:
+        raise DxfReaderError("The DXF file exceeds the configured pilot upload limit.")
 
     temporary_path: Path | None = None
     try:

@@ -1,0 +1,20 @@
+{
+  "baseline_version": "0.16.0-pilot",
+  "cases": [
+    {
+      "case_id": "CAD-SYNTHETIC-001",
+      "drawing": "synthetic-only",
+      "model": "synthetic-only",
+      "drawing_sha256": null,
+      "model_sha256": null,
+      "general_tolerance_applied": false,
+      "expected_judgement": "NG",
+      "expected_view_count": 1,
+      "expected_section_view_count": 0,
+      "expected_ng_categories": ["Tolerance"],
+      "required_features": [],
+      "approved_reviewer": null,
+      "notes": "Synthetic fixture only; no confidential engineering files are committed."
+    }
+  ]
+}
