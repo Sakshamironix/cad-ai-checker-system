@@ -63,6 +63,9 @@ class DimensionRequirement:
     unit: str
     layer: str
     source_text: str | None
+    definition_point: Point2D | None = None
+    extension_line_start: Point2D | None = None
+    extension_line_end: Point2D | None = None
     view_id: str | None = None
     requirement_id: str | None = None
     drawing_feature_id: str | None = None
@@ -262,6 +265,9 @@ def interpret_dxf_analysis(analysis: DxfAnalysis) -> DrawingRequirements:
                 unit="Millimetres",
                 layer=dimension.layer,
                 source_text=dimension.text_override,
+                definition_point=dimension.definition_point,
+                extension_line_start=dimension.extension_line_start,
+                extension_line_end=dimension.extension_line_end,
                 requirement_id=f"DIM-{ordinal:03d}",
             )
         )
