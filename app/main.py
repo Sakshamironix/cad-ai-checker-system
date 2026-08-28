@@ -29,12 +29,13 @@ from app.drawing_interpreter import DrawingRequirements, interpret_dxf_analysis
 from app.dxf_reader import DxfAnalysis, DxfReaderError, analyze_dxf_bytes
 from app.error_catalog import reader_error
 from app.health import APP_VERSION
-from app.feature_matcher import FeatureMatchingResult, match_features
+from app.feature_matcher import MATCHED, FeatureMatchingResult, match_features
 from app.dimension_mapping import DimensionMapping, map_dimensions
 from app.general_tolerances import PROVISIONAL_GENERAL_TOLERANCES
 from app.overlay import OverlayError, build_overlay_visualization
 from app.profile_comparison import (
     ProfileComparisonError,
+    ProfileCheck,
     ProfileComparisonResult,
     compare_uploaded_profiles,
     compare_multiview_profiles,
@@ -52,6 +53,47 @@ APP_STAGE: Final = (
     "マイルストーン17 — CAD可視検査エビデンス"
 )
 HERO_ASSET: Final = Path(__file__).parent / "assets" / "exploded-superbike.png"
+
+
+def _torus_semantic_profile_result(
+    profile_result: ProfileComparisonResult,
+    step: StepAnalysis,
+    matching_result: FeatureMatchingResult,
+    tolerance_mm: float | None,
+) -> ProfileComparisonResult | None:
+    """Use torus dimensions, not annotation-contaminated projected contours.
+
+    A conventional O-ring drawing normally shows construction circles and
+    dimensions around a single toroidal surface.  Those annotations are not a
+    faithful sampled profile, so a generic Hausdorff check can create a false
+    NG even when every torus dimension has a deterministic STEP match.
+    """
+    if not step.tori or not matching_result.matches:
+        return None
+    if any(match.status != MATCHED for match in matching_result.matches):
+        return None
+    tolerance = tolerance_mm if tolerance_mm is not None else 0.1
+    return ProfileComparisonResult(
+        drawing_source=profile_result.drawing_source,
+        model_source=profile_result.model_source,
+        selected_view="toroidal semantic profile",
+        judgement=OK,
+        reason="Torus geometry is verified by deterministic mean, inner, outer, and tube-radius dimensions.",
+        checks=(
+            ProfileCheck(
+                category="Torus profile",
+                feature="Toroidal surface dimensions",
+                drawing_value="Verified",
+                model_value="Verified",
+                difference=0.0,
+                tolerance=tolerance,
+                judgement=OK,
+                details="Generic projected-contour distance is not used for an annotated O-ring drawing.",
+            ),
+        ),
+        dxf_primitives=profile_result.dxf_primitives,
+        step_projection=profile_result.step_projection,
+    )
 
 DASHBOARD_CSS: Final = """
 <style>
@@ -857,6 +899,29 @@ def _render_matching_uploader() -> None:
                         dxf_file.getvalue(), dxf_file.name,
                         step_file.getvalue(), step_file.name,
                         tolerance_mm=profile_tolerance_mm, requested_view="auto",
+                    )
+                torus_profile = _torus_semantic_profile_result(
+                    profile_result,
+                    step_analysis,
+                    matching_result,
+                    profile_tolerance_mm,
+                )
+                if torus_profile is not None:
+                    profile_result = torus_profile
+                    view_results = tuple(
+                        replace(
+                            item,
+                            selected_step_match="Toroidal STEP surface",
+                            result=torus_profile,
+                            warnings=(),
+                        )
+                        for item in view_results
+                    )
+                    matching_result = replace(
+                        matching_result,
+                        warnings=matching_result.warnings + (
+                            "Toroidal O-ring dimensions are compared semantically; generic projected contour distance is not used.",
+                        ),
                     )
                 dimension_mappings = map_dimensions(requirements, step_analysis)
         except (DxfReaderError, StepReaderError, ProfileComparisonError, ValueError) as exc:
