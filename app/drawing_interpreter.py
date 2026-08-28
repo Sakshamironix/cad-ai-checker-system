@@ -131,7 +131,12 @@ class DrawingRequirements:
 
 def _normalize_text(text: str) -> str:
     """Normalize common AutoCAD control text and whitespace."""
-    normalized = text.replace("%%c", "⌀").replace("%%C", "⌀")
+    normalized = (
+        text.replace("%%c", "⌀")
+        .replace("%%C", "⌀")
+        .replace("\\U+2205", "⌀")
+        .replace("\\u+2205", "⌀")
+    )
     return " ".join(normalized.replace("\\P", " ").split())
 
 
