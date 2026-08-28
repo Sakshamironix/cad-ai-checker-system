@@ -23,6 +23,15 @@ def measurable_features(step: StepAnalysis) -> tuple[StepMeasurement, ...]:
     ]
     for index, hole in enumerate(step.holes, start=1):
         features.append(StepMeasurement(f"HOLE-{index:02d}", "through hole", hole.diameter, f"Reversed cylindrical STEP face {hole.face_index}"))
+    for index, torus in enumerate(step.tori, start=1):
+        prefix = f"TORUS-{index:02d}"
+        evidence = f"Toroidal STEP face {torus.face_index}"
+        features.extend((
+            StepMeasurement(f"{prefix}-MEAN-DIA", "torus mean diameter", torus.mean_diameter, evidence),
+            StepMeasurement(f"{prefix}-INNER-DIA", "torus inner diameter", torus.inner_diameter, evidence),
+            StepMeasurement(f"{prefix}-OUTER-DIA", "torus outer diameter", torus.outer_diameter, evidence),
+            StepMeasurement(f"{prefix}-TUBE-RADIUS", "torus tube radius", torus.minor_radius, evidence),
+        ))
     return tuple(features)
 
 
