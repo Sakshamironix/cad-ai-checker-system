@@ -59,5 +59,48 @@ def segment_views(analysis: DxfAnalysis, gap_mm: float = 12.0) -> tuple[DrawingV
     return tuple(views)
 
 def assign_dimension_view(analysis: DxfAnalysis, views: tuple[DrawingView, ...], entity_index: int) -> str | None:
+    """Assign a dimension to one isolated view using deterministic evidence."""
     matches = [view.view_id for view in views if entity_index in view.dimension_indexes]
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]
+    if matches or not views:
+        return None
+
+    dimension = next(
+        (item for item in analysis.dimensions if item.entity_index == entity_index),
+        None,
+    )
+    if dimension is None:
+        return None
+
+    extension_anchors = tuple(
+        point
+        for point in (dimension.extension_line_start, dimension.extension_line_end)
+        if point is not None
+    )
+    anchors = extension_anchors or tuple(
+        point
+        for point in (dimension.definition_point, dimension.text_position)
+        if point is not None
+    )
+    if not anchors:
+        return None
+
+    def distance_to_view(point: Point2D, view: DrawingView) -> float:
+        dx = max(view.minimum.x - point.x, 0.0, point.x - view.maximum.x)
+        dy = max(view.minimum.y - point.y, 0.0, point.y - view.maximum.y)
+        return (dx * dx + dy * dy) ** 0.5
+
+    ranked = sorted(
+        (
+            (sum(distance_to_view(point, view) for point in anchors), view)
+            for view in views
+        ),
+        key=lambda item: (item[0], item[1].view_id),
+    )
+    best_distance, best_view = ranked[0]
+    # A dimension can be outside the contour; assign it only when one view is
+    # uniquely nearest.  Equidistant evidence remains deliberately unassigned.
+    if len(ranked) > 1 and abs(ranked[1][0] - best_distance) <= 1e-6:
+        return None
+    return best_view.view_id
