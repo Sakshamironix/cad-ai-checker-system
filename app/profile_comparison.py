@@ -223,7 +223,14 @@ def compare_multiview_profiles(dxf_data: bytes, dxf_filename: str, step_data: by
             key=lambda item: _projection_selection_score(primitives, item),
         )
         result=compare_profile_geometry(primitives, projection, tolerance_mm, drawing_source=dxf_filename, model_source=step_filename)
-        match = next((item.plane for item in sections if item.projection == projection), projection.view)
+        # Centre sections intentionally reuse the same geometry as normal
+        # orthographic projections.  Candidate source—not dataclass equality—
+        # determines the label shown in the report.
+        match = (
+            next(item.plane for item in sections if item.projection == projection)
+            if "section" in kind.lower()
+            else projection.view
+        )
         results.append(ViewProfileResult(view.view_id, kind, match, result, ()))
     return tuple(results)
 
