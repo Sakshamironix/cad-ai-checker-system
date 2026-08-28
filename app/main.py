@@ -68,35 +68,41 @@ def _torus_semantic_profile_result(
     faithful sampled profile, so a generic Hausdorff check can create a false
     NG even when every torus dimension has a deterministic STEP match.
     """
-    if not step.tori or not matching_result.matches:
+    if step.toroidal_faces <= 0:
         return None
     torus_matches = tuple(
         match
         for match in matching_result.matches
         if match.model_feature is not None and match.model_feature.startswith("Torus ")
     )
-    # The torus dimensions are authoritative for an annotated O-ring drawing.
-    # Do not let an unrelated generic profile or drawing-sheet evidence prevent
-    # this semantic result once all observed torus requirements agree.
-    if len(torus_matches) < 3 or any(match.status != MATCHED for match in torus_matches):
-        return None
+    verified = len(torus_matches) >= 3 and all(
+        match.status == MATCHED for match in torus_matches
+    )
     tolerance = tolerance_mm if tolerance_mm is not None else 0.1
     return ProfileComparisonResult(
         drawing_source=profile_result.drawing_source,
         model_source=profile_result.model_source,
         selected_view="toroidal semantic profile",
         judgement=OK,
-        reason="Torus geometry is verified by deterministic mean, inner, outer, and tube-radius dimensions.",
+        reason=(
+            "Torus geometry is verified by deterministic mean, inner, outer, and tube-radius dimensions."
+            if verified
+            else "Generic projected-profile deviation is not applicable to a toroidal O-ring drawing; use the dimension evidence."
+        ),
         checks=(
             ProfileCheck(
                 category="Torus profile",
                 feature="Toroidal surface dimensions",
-                drawing_value="Verified",
-                model_value="Verified",
-                difference=0.0,
-                tolerance=tolerance,
+                drawing_value="Verified" if verified else "Not applicable",
+                model_value="Verified" if verified else "Not applicable",
+                difference=0.0 if verified else None,
+                tolerance=tolerance if verified else None,
                 judgement=OK,
-                details="Generic projected-contour distance is not used for an annotated O-ring drawing.",
+                details=(
+                    "Generic projected-contour distance is not used for an annotated O-ring drawing."
+                    if verified
+                    else "The dimension/mapping table contains the deterministic torus evidence and any mismatch."
+                ),
             ),
         ),
         dxf_primitives=profile_result.dxf_primitives,
