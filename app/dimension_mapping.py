@@ -23,9 +23,11 @@ class DimensionMapping:
 def _features_for_requirement(requirement: DimensionRequirement, step: StepAnalysis) -> tuple[StepMeasurement, ...]:
     features = measurable_features(step)
     if requirement.classification in {"diameter", "radius"}:
-        return tuple(item for item in features if item.feature_type == "through hole")
+        if requirement.classification == "radius":
+            return tuple(item for item in features if item.feature_type in {"through hole", "torus tube radius"})
+        return tuple(item for item in features if item.feature_type in {"through hole", "torus mean diameter", "torus inner diameter", "torus outer diameter"})
     if requirement.classification in {"linear", "ordinate"}:
-        return tuple(item for item in features if item.feature_id.startswith("EXTENT-"))
+        return tuple(item for item in features if item.feature_id.startswith("EXTENT-") or item.feature_type == "torus mean diameter")
     return ()
 
 
