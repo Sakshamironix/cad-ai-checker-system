@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.drawing_interpreter import interpret_dxf_analysis, parse_dimension_text
+from app.drawing_interpreter import _normalize_text, interpret_dxf_analysis, parse_dimension_text
 from app.dxf_reader import (
     CircleFeature,
     DimensionFeature,
@@ -56,6 +56,10 @@ def test_parse_placeholder_uses_measured_value() -> None:
     assert result.tolerance is not None
     assert result.tolerance.lower_deviation == pytest.approx(-0.10)
     assert result.tolerance.upper_deviation == pytest.approx(0.10)
+
+
+def test_normalize_autocad_unicode_diameter_symbol() -> None:
+    assert "⌀" in _normalize_text(r"\\A1;\\U+2205<>")
 
 
 def test_parse_limit_dimension() -> None:
