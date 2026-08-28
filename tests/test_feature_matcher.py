@@ -20,7 +20,7 @@ from app.feature_matcher import (
     match_features,
 )
 from app.general_tolerances import GeneralToleranceSet
-from app.step_reader import HoleFeature, StepAnalysis, TopologyCounts, Vector3D
+from app.step_reader import HoleFeature, StepAnalysis, TorusFeature, TopologyCounts, Vector3D
 
 
 def _step_analysis() -> StepAnalysis:
@@ -144,6 +144,36 @@ def test_linear_hole_offsets_and_pitch_are_matched_from_step_axes() -> None:
     linear = [match for match in result.matches if match.requirement == "Linear dimension"]
     assert [match.status for match in linear] == [MATCHED, MATCHED]
     assert {match.model_value_mm for match in linear} == {15.0, 35.0}
+
+
+def test_torus_dimensions_are_not_treated_as_through_holes() -> None:
+    step = StepAnalysis(
+        source_name="oring.step", topology=TopologyCounts(1, 1, 1, 1, 1),
+        bounding_box=Vector3D(7.0, 7.0, 2.0), volume=1.0, surface_area=1.0,
+        center_of_mass=Vector3D(0.0, 0.0, 0.0), planar_faces=0,
+        cylindrical_faces=0, circular_edges=2, outer_boundaries=1,
+        outer_boundary_length=1.0, holes=(),
+        tori=(TorusFeature(1, major_radius=2.5, minor_radius=1.0),),
+    )
+    tolerance = Tolerance(-0.1, 0.1)
+    requirements = DrawingRequirements(
+        source_name="oring.dxf", units_name="Millimetres", drawing_size=None,
+        general_tolerance=None,
+        dimensions=(
+            _dimension(1, "linear", 5.0, tolerance),
+            _dimension(2, "radius", 1.0, tolerance),
+            _dimension(3, "diameter", 3.0, tolerance),
+            _dimension(4, "diameter", 7.0, tolerance),
+        ),
+        hole_candidates=(), notes=(), warnings=(),
+    )
+
+    result = match_features(requirements, step)
+
+    assert result.issue_count == 0
+    assert all(match.status == MATCHED for match in result.matches)
+    assert any(match.requirement == "Torus 1 inner diameter" for match in result.matches)
+    assert not any("hole without" in match.requirement.lower() for match in result.matches)
 
 
 def test_out_of_tolerance_dimension_is_reported() -> None:
