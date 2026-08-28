@@ -70,7 +70,15 @@ def _torus_semantic_profile_result(
     """
     if not step.tori or not matching_result.matches:
         return None
-    if any(match.status != MATCHED for match in matching_result.matches):
+    torus_matches = tuple(
+        match
+        for match in matching_result.matches
+        if match.model_feature is not None and match.model_feature.startswith("Torus ")
+    )
+    # The torus dimensions are authoritative for an annotated O-ring drawing.
+    # Do not let an unrelated generic profile or drawing-sheet evidence prevent
+    # this semantic result once all observed torus requirements agree.
+    if len(torus_matches) < 3 or any(match.status != MATCHED for match in torus_matches):
         return None
     tolerance = tolerance_mm if tolerance_mm is not None else 0.1
     return ProfileComparisonResult(
