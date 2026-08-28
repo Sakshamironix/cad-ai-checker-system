@@ -406,6 +406,8 @@ def _linear_relationship_candidates(step: StepAnalysis) -> list[tuple[int, str, 
                 pitch = abs(second_value - first_value)
                 if pitch > 1e-7:
                     candidates.append((index, f"Hole {first + 1}-{second + 1} {axis_name} pitch", pitch)); index += 1
+    for torus_number, torus in enumerate(step.tori, start=1):
+        candidates.append((index, f"Torus {torus_number} mean diameter", torus.mean_diameter)); index += 1
     return candidates
 
 
@@ -445,6 +447,18 @@ def _match_cylindrical_dimensions(
             )
             for index, hole in enumerate(step.holes)
         ]
+        offset = len(candidates)
+        for torus_number, torus in enumerate(step.tori, start=1):
+            if dimension.classification == "radius":
+                candidates.append((offset, f"Torus {torus_number} tube radius", torus.minor_radius))
+                offset += 1
+            else:
+                candidates.extend((
+                    (offset, f"Torus {torus_number} inner diameter", torus.inner_diameter),
+                    (offset + 1, f"Torus {torus_number} outer diameter", torus.outer_diameter),
+                    (offset + 2, f"Torus {torus_number} mean diameter", torus.mean_diameter),
+                ))
+                offset += 3
         candidate = _closest_available(nominal_mm, candidates, used_for_dimensions)
         if candidate is None:
             matches.append(
@@ -453,13 +467,16 @@ def _match_cylindrical_dimensions(
                     source_entity=dimension.entity_index,
                     requirement=label,
                     drawing_value_mm=nominal_mm,
-                    reason="No likely cylindrical STEP hole is available.",
+                    reason="No compatible cylindrical-hole or toroidal STEP feature is available.",
                 )
             )
             continue
-        hole_index, hole_label, model_value = candidate
-        used_for_dimensions.add(hole_index)
-        referenced_holes.add(hole_index)
+        candidate_index, hole_label, model_value = candidate
+        used_for_dimensions.add(candidate_index)
+        is_hole = candidate_index < len(step.holes)
+        if is_hole:
+            referenced_holes.add(candidate_index)
+        requirement_label = label if is_hole else hole_label
         converted_tolerance = _converted_tolerance(
             dimension.tolerance,
             factor,
@@ -471,7 +488,7 @@ def _match_cylindrical_dimensions(
                 _missing_tolerance(
                     source_kind="dimension",
                     source_entity=dimension.entity_index,
-                    requirement=label,
+                    requirement=requirement_label,
                     drawing_value_mm=nominal_mm,
                     model_feature=hole_label,
                     model_value_mm=model_value,
@@ -484,7 +501,7 @@ def _match_cylindrical_dimensions(
             _comparison(
                 source_kind="dimension",
                 source_entity=dimension.entity_index,
-                requirement=label,
+                requirement=requirement_label,
                 drawing_value_mm=nominal_mm,
                 model_feature=hole_label,
                 model_value_mm=model_value,
@@ -492,7 +509,7 @@ def _match_cylindrical_dimensions(
                 upper_deviation_mm=upper,
                 tolerance_source=dimension.tolerance_source or fallback_source,
                 confidence="medium",
-                reason_prefix="Closest likely STEP hole by size",
+                reason_prefix="Closest compatible STEP circular or toroidal feature by size",
             )
         )
     return matches
@@ -511,6 +528,10 @@ def _match_circle_candidates(
         (index, f"Likely STEP hole face {hole.face_index}", hole.diameter)
         for index, hole in enumerate(step.holes)
     ]
+    offset = len(candidates)
+    for torus_number, torus in enumerate(step.tori, start=1):
+        candidates.append((offset, f"Torus {torus_number} outer diameter", torus.outer_diameter))
+        offset += 1
     used_for_circles: set[int] = set()
     matches: list[FeatureMatch] = []
 
@@ -528,13 +549,14 @@ def _match_circle_candidates(
                     source_entity=circle.entity_index,
                     requirement="Circle diameter",
                     drawing_value_mm=diameter_mm,
-                    reason="No unused likely cylindrical STEP hole is available.",
+                    reason="No unused likely cylindrical-hole or toroidal STEP feature is available.",
                 )
             )
             continue
-        hole_index, hole_label, hole_diameter = candidate
-        used_for_circles.add(hole_index)
-        referenced_holes.add(hole_index)
+        candidate_index, hole_label, hole_diameter = candidate
+        used_for_circles.add(candidate_index)
+        if candidate_index < len(step.holes):
+            referenced_holes.add(candidate_index)
         if not general_tolerances.applied:
             matches.append(
                 _missing_tolerance(
@@ -560,7 +582,7 @@ def _match_circle_candidates(
                 upper_deviation_mm=general_tolerances.circular_mm,
                 tolerance_source="provisional general tolerance set",
                 confidence="medium",
-                reason_prefix="Closest likely STEP hole by diameter",
+                reason_prefix="Closest compatible STEP circular or toroidal feature by diameter",
             )
         )
     return matches
