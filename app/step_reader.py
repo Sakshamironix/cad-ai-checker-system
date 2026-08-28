@@ -53,6 +53,31 @@ class HoleFeature:
 
 
 @dataclass(frozen=True)
+class TorusFeature:
+    """One physical toroidal STEP surface, expressed in drawing units."""
+
+    face_index: int
+    major_radius: float
+    minor_radius: float
+
+    @property
+    def mean_diameter(self) -> float:
+        return self.major_radius * 2.0
+
+    @property
+    def outer_diameter(self) -> float:
+        return (self.major_radius + self.minor_radius) * 2.0
+
+    @property
+    def inner_diameter(self) -> float:
+        return (self.major_radius - self.minor_radius) * 2.0
+
+    @property
+    def tube_diameter(self) -> float:
+        return self.minor_radius * 2.0
+
+
+@dataclass(frozen=True)
 class StepAnalysis:
     """Serializable STEP model analysis returned to the UI and tests."""
 
@@ -69,6 +94,7 @@ class StepAnalysis:
     outer_boundary_length: float
     holes: tuple[HoleFeature, ...]
     toroidal_faces: int = 0
+    tori: tuple[TorusFeature, ...] = ()
     minimum: Vector3D | None = None
     maximum: Vector3D | None = None
 
@@ -133,6 +159,18 @@ def _deduplicate_holes(holes: list[HoleFeature]) -> tuple[HoleFeature, ...]:
     return tuple(unique)
 
 
+def _deduplicate_tori(tori: list[TorusFeature]) -> tuple[TorusFeature, ...]:
+    """One torus often has several split faces; retain its physical dimensions once."""
+    unique: list[TorusFeature] = []
+    keys: set[tuple[float, float]] = set()
+    for torus in tori:
+        key = (round(torus.major_radius, 6), round(torus.minor_radius, 6))
+        if key not in keys:
+            keys.add(key)
+            unique.append(torus)
+    return tuple(unique)
+
+
 def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> StepAnalysis:
     """Load and analyze a STEP/STP file from disk."""
     path = Path(file_path)
@@ -169,6 +207,7 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
     planar_faces = 0
     cylindrical_faces = 0
     toroidal_faces = 0
+    tori: list[TorusFeature] = []
     holes: list[HoleFeature] = []
     outer_boundaries = 0
     outer_boundary_length = 0.0
@@ -194,6 +233,14 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
                 )
         elif surface_type == GeomAbs_Torus:
             toroidal_faces += 1
+            torus = surface.Torus()
+            tori.append(
+                TorusFeature(
+                    face_index=face_index,
+                    major_radius=float(torus.MajorRadius()),
+                    minor_radius=float(torus.MinorRadius()),
+                )
+            )
 
         try:
             outer_wire = face.outerWire()
@@ -237,6 +284,7 @@ def analyze_step_file(file_path: str | Path, source_name: str | None = None) -> 
         outer_boundary_length=outer_boundary_length,
         holes=_deduplicate_holes(holes),
         toroidal_faces=toroidal_faces,
+        tori=_deduplicate_tori(tori),
         minimum=Vector3D(float(bounding_box.xmin), float(bounding_box.ymin), float(bounding_box.zmin)),
         maximum=Vector3D(float(bounding_box.xmax), float(bounding_box.ymax), float(bounding_box.zmax)),
     )
