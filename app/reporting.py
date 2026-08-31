@@ -246,14 +246,17 @@ def build_final_report(
             "General tolerance was not applied; requirements without explicit limits are NG."
         )
 
-    if ai_assistance is not None:
-        assisted_judgement = ai_assistance.get("overall_judgement")
-        if assisted_judgement != overall:
-            raise ValueError("Assisted explanation judgement does not match deterministic judgement")
-
     view_ng = tuple({"category": "View", "view": item.get("view_id"), "check": item.get("detected_type"), "details": "; ".join(item.get("warnings", [])) or "Per-view comparison is NG."} for item in view_results if item.get("judgement") == NG)
     mapping_ng = tuple({"category": "Feature mapping", "requirement": item.get("requirement_id"), "view": item.get("view_id"), "check": item.get("drawing_feature") or "Unmapped feature", "details": item.get("reason") or "Dimension mapping is NG."} for item in dimension_mappings if item.get("status") == NG)
     overall = NG if view_ng or mapping_ng else overall
+
+    # Assisted output is explanatory only.  It must never override or abort
+    # the deterministic engineering judgement.  A stale cached explanation is
+    # simply omitted when its claimed result no longer agrees with the final
+    # deterministic result, including view and feature-mapping evidence.
+    if ai_assistance is not None and ai_assistance.get("overall_judgement") != overall:
+        ai_assistance = None
+
     return FinalReport(
         generated_at_utc=generated_at_utc or _now_utc(),
         overall_judgement=overall,
