@@ -200,14 +200,16 @@ def test_report_includes_assistance_without_changing_judgement() -> None:
     assert report.to_pdf_bytes().startswith(b"%PDF-")
 
 
-def test_report_rejects_assistance_with_different_judgement() -> None:
+def test_report_discards_assistance_with_different_judgement() -> None:
     matching = _matching_result()
     judgement = evaluate_matching_result(matching)
 
-    with pytest.raises(ValueError, match="does not match deterministic judgement"):
-        build_final_report(
-            matching,
-            judgement,
-            _profile_result(),
-            ai_assistance={"overall_judgement": OK},
-        )
+    report = build_final_report(
+        matching,
+        judgement,
+        _profile_result(),
+        ai_assistance={"overall_judgement": OK},
+    )
+
+    assert report.overall_judgement == NG
+    assert report.to_dict()["ai_assistance"] is None
