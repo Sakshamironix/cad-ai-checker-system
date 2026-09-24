@@ -385,7 +385,7 @@ def _match_linear_dimensions(
 def _linear_relationship_candidates(step: StepAnalysis) -> list[tuple[int, str, float]]:
     """Derive edge offsets and hole pitches from STEP cylinder axes in millimetres."""
     if step.minimum is None or step.maximum is None:
-        return []
+        return [(10+i, f"Torus {i+1} mean diameter", t.mean_diameter) for i,t in enumerate(step.tori)]
     lower = (step.minimum.x, step.minimum.y, step.minimum.z)
     upper = (step.maximum.x, step.maximum.y, step.maximum.z)
     candidates: list[tuple[int, str, float]] = []
@@ -449,8 +449,9 @@ def _match_cylindrical_dimensions(
         ]
         offset = len(candidates)
         for torus_number, torus in enumerate(step.tori, start=1):
+            offset = len(step.holes) + (torus_number - 1) * 4
             if dimension.classification == "radius":
-                candidates.append((offset, f"Torus {torus_number} tube radius", torus.minor_radius))
+                candidates.append((offset + 3, f"Torus {torus_number} tube radius", torus.minor_radius))
                 offset += 1
             else:
                 candidates.extend((

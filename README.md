@@ -1,174 +1,104 @@
-# CAD AI Checker
+# CAD AI Checker — geometry-based dimension verification
 
-## Milestone 17 — Visual CAD inspection evidence
+This initial release compares native DXF dimensions with spatially corresponding
+features in an explicitly selected STEP projection or an actual solid section.
+It is a dimension checker, not full-shape, GD&T, or manufacturing release approval.
 
-The checker accepts DXF plus STEP/STP only. DXF drawing regions are segmented before
-comparison so geometry from separate drawing views never combines. Unitless DXF values
-are treated as millimetres; recorded unit metadata is retained and unsupported metadata
-raises a warning. The deterministic engine selects orthographic STEP projections for
-standard views and centre-plane candidates for full sections. A view that cannot be
-classified or compared produces NG, never REVIEW. AI assistance can explain evidence
-only and cannot change the deterministic OK/NG judgement.
+## Run
 
-Milestone 17 adds visual evidence for every deterministic comparison. Each detected DXF
-view now has an isolated DXF panel, the selected STEP projection, and a coloured overlay
-that shows the exact geometry used by the comparison engine. The dashboard applies the
-background general-tolerance rule set automatically; explicit drawing tolerances still take
-priority. Permanent public hosting remains a later deployment milestone.
-
-Permanent hosting is scheduled for a later deployment milestone; the Codespaces Streamlit URL is only
-available while its Codespace and process are running.
-
-A browser-first engineering prototype that compares a 2D DXF drawing with a 3D STEP/STP model. Development and trials run in GitHub Codespaces through a Streamlit dashboard.
-
-## Current milestone
-
-Milestone 17 includes the completed pilot hardening plus visual CAD inspection evidence:
-
-- STEP/STP topology, dimensions, physical properties, planar/cylindrical geometry, and likely-hole detection.
-- DXF units, layers, extents, dimensions, text, circles, arcs, and normalized drawing requirements.
-- Deterministic 2D-to-3D dimension and cylindrical-feature matching.
-- Projected outer-profile and internal circular-profile comparison.
-- Deterministic **OK** or **NG (Not Good)** judgement; there is no REVIEW state.
-- Per-view DXF/STEP visual evidence, including the isolated DXF view, selected STEP projection, and coloured overlay.
-- English/Japanese predefined dashboard text.
-- Numerical general-tolerance values maintained and applied automatically from the background rule set.
-- Explicit drawing tolerances taking priority over background general-tolerance rules.
-- Explicit drawing tolerances taking priority over the automatically applied background rule set.
-- Ordered, downloadable JSON and PDF final reports.
-- A bilingual local explanation for every completed check, including possible causes and recommended verification steps.
-- Optional Gemini-primary explanations with automatic Groq fallback, based only on normalized comparison evidence and drawing text.
-- A hard boundary that prevents the explanation layer from changing deterministic OK/NG or evidence identity.
-- Split-arc reconstruction, concentric annular profile detection, and STEP torus extraction.
-- Normalized `DIM-###` requirements with explicit, limit, symmetric, asymmetric, and unilateral tolerance parsing.
-- STEP-geometry measurements for extents and likely through-hole diameters.
-- Deterministic unique feature mapping; missing or ambiguous feature mappings are NG.
-- Versioned `config/general_tolerances.json` validation and tolerance-priority resolution.
-- Versioned `config/runtime_limits.json` for upload, topology, time and report limits.
-- Container startup with a non-root user, health check and restart policy.
-- Controlled bilingual DXF/STEP error messages with safe recovery guidance.
-- Offline health checks that verify dependencies, configuration and temporary storage without calling AI providers.
-
-## Final report order
-
-1. Overall OK/NG judgement.
-2. File identification.
-3. General-tolerance application state.
-4. Dimension summary.
-5. Profile summary.
-6. NG findings.
-7. Assisted explanation and its safety notice.
-8. Detailed dimension and profile evidence.
-9. Visual-overlay evidence metadata.
-10. Warnings and known limitations.
-
-The report is a prototype engineering aid and is not production release approval.
-
-## Repository layout
-
-```text
-cad-ai-checker-system/
-├── .devcontainer/             # GitHub Codespaces configuration
-├── .github/workflows/         # Automated pytest workflow
-├── app/
-│   ├── main.py                # Streamlit dashboard
-│   ├── step_reader.py         # STEP/STP analysis
-│   ├── dxf_reader.py          # DXF analysis
-│   ├── drawing_interpreter.py # Drawing requirement normalization
-│   ├── feature_matcher.py     # Dimension/feature matching
-│   ├── dimension_mapping.py   # View-aware DXF-to-STEP mapping evidence
-│   ├── step_measurements.py   # Geometry-derived STEP measurements
-│   ├── tolerance_resolver.py  # Explicit/general tolerance priority
-│   ├── tolerance_validation.py# Background-rule configuration validation
-│   ├── runtime_limits.py      # Pilot processing-limit validation
-│   ├── diagnostics.py         # Safe timing diagnostics
-│   ├── error_catalog.py       # Bilingual controlled errors
-│   └── health.py              # Offline readiness check
-│   ├── profile_comparison.py  # Projected-shape comparison
-│   ├── overlay.py             # SVG comparison overlay
-│   ├── general_tolerances.py  # Background tolerance rule set
-│   ├── ai_assistant.py        # Guarded bilingual discrepancy assistance
-│   └── reporting.py           # JSON/PDF final reports
-├── config/general_tolerances.json # Versioned background tolerance rules
-├── tests/                     # Automated synthetic CAD tests
-├── environment.yml            # Conda CAD environment
-└── requirements.txt           # Pip dependencies
-```
-
-## Launch in GitHub Codespaces
-
-Open the repository Codespace and run:
+The repository's Conda environment supplies CadQuery/OpenCASCADE and the UI dependencies:
 
 ```bash
-/opt/conda/envs/cad-ai-checker/bin/pytest -q
-/opt/conda/envs/cad-ai-checker/bin/streamlit run app/main.py
+conda env create -f environment.yml
+conda activate cad-ai-checker
+python -m streamlit run app/main.py --server.address=0.0.0.0 --server.port=8501
 ```
 
-Open forwarded port `8501`, select **Run CAD Check / CAD照合**, upload one DXF and one STEP/STP file, and press **Run CAD Check / CAD照合を実行**.
-
-After calculation, the dashboard displays:
-
-- Overall OK/NG judgement.
-- Dimension and profile summary.
-- Per-view DXF geometry, selected STEP projection, and comparison overlay.
-- Bilingual discrepancy explanation with possible causes and recommended checks.
-- Detailed comparison evidence.
-- JSON and PDF report download buttons.
-
-## Milestone 16 pilot container
-
-Build and start the restartable pilot container locally:
+In an existing configured Codespace:
 
 ```bash
-docker compose up --build
+git pull --ff-only origin main
+bash scripts/start-dashboard.sh
 ```
 
-The dashboard is then available on `http://localhost:8501`. Store `GEMINI_API_KEY` and
-`GROQ_API_KEY` only in the host or deployment secret store; never add them to files or
-images. Verify the container without calling AI providers:
+The devcontainer post-start hook runs this idempotent startup script. It uses one
+fixed port (8501), verifies Streamlit's health endpoint, and writes startup errors
+to `.logs/dashboard.log`. A health endpoint alone does not prove a CAD check works.
+Open the URL actually shown in the Codespace **Ports** tab; old Codespace URLs are
+not permanent hosting. Port sharing remains controlled by GitHub/Codespaces.
+
+## Checking a drawing
+
+1. Upload millimetre DXF and STEP/STP files. Unitless DXF requires explicit mm confirmation.
+2. Exclude centreline, construction, title, and border layers where needed. Inspect view
+   separation; adjust the gap when disconnected geometry belongs to one figure.
+3. Assign every native DIMENSION to exactly one figure. Dimensions outside the figure
+   can be assigned manually. Unassigned/duplicate dimensions return NG, never a pass.
+4. Choose a named STEP projection (visible outlines; hidden edges optional), or select
+   an X/Y/Z plane and its **absolute STEP coordinate** for a true cross-section.
+5. Inspect the grey DXF and amber STEP overlay. Set quarter-turn rotation and translation
+   if necessary, then confirm the correspondence. The model is never scaled to fit.
+6. Enable an explicit project fallback tolerance only if appropriate. Text tolerances and
+   native DXF dimension-style tolerances take precedence. No implicit ±0.1 mm approval.
+7. Run the check. Export the same authoritative result as CSV, JSON, or PDF.
+
+### How measurements work
+
+Linear/aligned dimensions reference the DXF extension-line origins. Those anchors
+must correspond to drawing geometry, then uniquely associate spatially with
+STEP projected vertices or circle centres/extrema. Linear distances are measured
+along the dimension direction; aligned dimensions use endpoint distance.
+
+Radius/diameter dimensions identify the drawn circle/arc by centre and radial anchor,
+then require a unique spatially corresponding projected circle. Nominal dimension
+text is used only in tolerance evaluation, never to select the STEP feature.
+
+The association distance is a geometric search radius, not a pass tolerance.
+Unresolved and ambiguous correspondences return `NG — Cannot verify`; numerical
+out-of-limit measurements return `NG — Measured geometry is outside dimension limits`.
+An OK means every assigned native dimension was verified, not that undimensioned
+geometry or all manufacturing requirements were checked.
+
+OpenCASCADE hidden-line projection includes curved silhouettes. Circular torus
+silhouettes represented approximately by HLR are recovered from their corresponding
+analytic STEP surface; there is no blanket torus pass. Sections use actual
+plane/solid intersections, including blind-hole depth effects.
+
+## Supported initial scope and limitations
+
+- Native linear, aligned, diameter, and radius DXF dimensions in millimetres.
+- Six orthographic views and axis-normal sections at user-selected offsets.
+- Explicit symmetric/asymmetric text limits, native dimension-style limits, and an
+  optional user-defined uniform fallback tolerance.
+- Equal-size features are disambiguated by geometry, not numerical coincidence.
+- Every view selection/alignment is operator-confirmed; automatic interpretation of
+  arbitrary drawing cutting-plane labels is not claimed.
+- Angular, ordinate, quantity/reference callouts, exploded dimensions, complex
+  formatted tolerance text, GD&T, oblique/stepped cuts, arbitrary-angle alignment,
+  and drawing detail-scale normalization are not verified in this release.
+- Annotation geometry on the same layer as part geometry may require DXF cleanup.
+- Radius dimensions on partially visible arcs without a unique circular projection
+  require an appropriate section/view or return cannot verify.
+- Preview and landmark sampling do not constitute a certified profile-tolerance test.
+
+## Changes from the previous prototype
+
+The active dashboard no longer calls the global nearest-number feature matcher,
+legacy dimension mapper, generic profile-width/deviation tests, or the torus
+semantic override. It has one dimension-result path shared by screen and exports.
+Legacy modules are retained for compatibility tests and historical development;
+they do not decide the new dashboard's result. AI explanations and unrelated
+engineering summary panels were removed from the active checking flow.
+
+## Validation
 
 ```bash
-docker compose exec cad-ai-checker python scripts/healthcheck.py
+python -m pytest -q
+python -m py_compile app/*.py
 ```
 
-For rollback, deploy the previously verified image tag, run the health check above, and
-record the restored Git commit plus the runtime and tolerance-rule versions. Do not include
-uploads or secrets in images, logs, reports or backups. Permanent HTTPS hosting is Milestone 17.
-
-## Optional dual-provider AI enhancement
-
-The local deterministic explanation works without credentials. To enable enhanced explanations, add encrypted GitHub Codespaces secrets named `GEMINI_API_KEY` and `GROQ_API_KEY`, then rebuild or restart the Codespace. Gemini is tried first; Groq is used automatically if Gemini fails. Optional `GEMINI_MODEL` and `GROQ_MODEL` environment variables can override the defaults.
-
-The optional request contains normalized judgement evidence, summaries, NG findings, drawing text, and known limitations. Raw DXF and STEP/STP file bytes and API keys are never included in the request evidence or reports. Provider API usage may be billed separately.
-
-## Expected test output
-
-`pytest -q` should finish with all tests passing. Dependency deprecation warnings from CadQuery/pyparsing may still be displayed.
-
-## Current known limitations
-
-- Profile registration centers geometry and tests rotations only in 90-degree steps.
-- Hole matching currently uses diameter/radius; complete hole-axis and center-position comparison is not implemented.
-- Linear dimension matching currently relies on STEP bounding-box axes.
-- Angular dimensions, GD&T, datums, threads, surface finish, and full positional requirements are not complete.
-- The background general-tolerance table is provisional until the approved project rules are supplied.
-- The PDF includes comparison evidence and overlay metadata, but not the rendered SVG graphic itself.
-- AI-generated possible causes are hypotheses and require engineering verification; they never change OK/NG.
-
-## Diagnose setup errors
-
-Run:
-
-```bash
-which python
-/opt/conda/envs/cad-ai-checker/bin/python --version
-/opt/conda/envs/cad-ai-checker/bin/python -c "import cadquery, ezdxf, reportlab, streamlit; print('imports successful')"
-```
-
-Expected Python environment:
-
-```text
-/opt/conda/envs/cad-ai-checker
-```
-
-If imports fail after dependency changes, rebuild the Codespace container from the Codespaces command palette. If the dashboard does not open, check that port `8501` is running and set to the required visibility in the **Ports** panel.
+The geometry regression suite creates real STEP solids and DXF dimensions. It covers
+matching/mismatching width, misleading dimension text, displaced holes, circular
+measurements, actual blind-hole and torus sections, partial arcs, ambiguous anchors,
+missing limits, file import through PDF export, and dashboard stale-result clearing.
+Original user CAD files must still be validated before production use.

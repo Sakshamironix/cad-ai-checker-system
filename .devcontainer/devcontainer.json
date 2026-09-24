@@ -26,11 +26,12 @@
   "portsAttributes": {
     "8501": {
       "label": "Streamlit CAD AI Checker",
-      "onAutoForward": "openBrowser"
+      "onAutoForward": "notify"
     }
   },
   "postCreateCommand": "python --version && python -c \"import cadquery, ezdxf, streamlit; print('CAD environment is ready')\"",
   "remoteEnv": {
     "PYTHONPATH": "${containerWorkspaceFolder}"
-  }
+  },
+  "postStartCommand": "bash scripts/start-dashboard.sh"
 }

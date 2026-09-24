@@ -93,7 +93,7 @@ def _rounded_point(point: Point2D, digits: int = 7) -> tuple[float, float]:
 
 def _sample_edge(edge: cq.Edge, view: str, count: int = 96) -> tuple[Point2D, ...]:
     try:
-        vectors = edge.discretize(n=count)
+        vectors = [edge.positionAt(i / (count - 1)) for i in range(count)]
     except Exception:
         vectors = [edge.startPoint(), edge.endPoint()]
     return tuple(_project_vector(vector, view) for vector in vectors)
@@ -141,7 +141,7 @@ def project_step_shape(shape: cq.Shape, view: str) -> StepProjection:
                 + float(axis.Y()) * direction[1]
                 + float(axis.Z()) * direction[2]
             )
-            if alignment >= 0.999:
+            if alignment >= 0.999 and abs(adaptor.LastParameter() - adaptor.FirstParameter() - 2 * math.pi) < 1e-6:
                 location = circle.Location()
                 center = _project_xyz(
                     float(location.X()),
