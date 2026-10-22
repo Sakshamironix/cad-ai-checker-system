@@ -17,7 +17,7 @@ def main():
     LOGS.mkdir(exist_ok=True)
     token_file=LOGS/'cad-api-key'
     if not token_file.exists():
-        with token_file.open('x',opener=lambda path,flags:os.open(path,flags,0o600)) as stream:
+        with open(token_file,'x',opener=lambda path,flags:os.open(path,flags,0o600)) as stream:
             stream.write(secrets.token_urlsafe(48))
     token=token_file.read_text().strip()
     if len(token)<32: raise RuntimeError('CAD API key file is invalid. Restore a valid key before starting.')
