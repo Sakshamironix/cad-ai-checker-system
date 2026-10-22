@@ -20,7 +20,7 @@ from app.view_segmentation import segment_views
 from app.step_section import section_shape
 
 APP_NAME = 'CAD AI Checker'
-APP_STAGE = 'Geometry-based dimension verification / 図形に基づく寸法照合'
+APP_STAGE = 'Geometry-based dimension verification'
 
 def get_app_status():
     return {'application': APP_NAME, 'stage': APP_STAGE, 'version': ENGINE_VERSION}
@@ -53,15 +53,24 @@ def pdf_report(payload):
 
 def main():
     st.set_page_config(page_title=APP_NAME, layout='wide')
-    st.title('CAD dimension checker / CAD寸法照合')
+    st.markdown('''<style>
+    .stApp {background:#f5f7fa;}
+    .block-container {max-width:1440px;padding-top:2rem;}
+    h1,h2,h3 {color:#132a40;}
+    [data-testid="stFileUploader"] {background:white;border:1px solid #dce3eb;border-radius:12px;padding:16px;}
+    [data-testid="stMetric"] {background:white;border:1px solid #dce3eb;border-radius:10px;padding:14px;}
+    .stButton>button[kind="primary"] {background:#156b77;border:0;}
+    </style>''', unsafe_allow_html=True)
+    st.title('CAD dimension checker')
     st.caption('DXF drawing → STEP view or real section → feature measurement → dimension limits')
     st.caption(f'{ENGINE_VERSION} · Checks assigned dimensions only; unsupported evidence is NG — cannot verify.')
+    st.subheader('1. Upload drawing and model')
     a,b = st.columns(2)
-    dxf = a.file_uploader('2D drawing / 2D図面 (.dxf)', type=['dxf'])
-    step = b.file_uploader('3D model / 3Dモデル (.step / .stp)', type=['step','stp'])
-    with st.expander('Comparison settings / 照合設定'):
-        use_general = st.checkbox('Apply project tolerance where the drawing has no explicit limit / 普通公差を適用', value=False)
-        general = st.number_input('Project tolerance ± mm / プロジェクト公差', min_value=.0001, value=.1, format='%.4f', disabled=not use_general)
+    dxf = a.file_uploader('2D drawing (.dxf)', type=['dxf'])
+    step = b.file_uploader('3D model (.step / .stp)', type=['step','stp'])
+    with st.expander('Comparison settings'):
+        use_general = st.checkbox('Apply project tolerance where the drawing has no explicit limit', value=False)
+        general = st.number_input('Project tolerance ± mm', min_value=.0001, value=.1, format='%.4f', disabled=not use_general)
         association = st.number_input('Maximum anchor search distance (mm)', min_value=.001, max_value=10., value=1., format='%.3f')
         st.caption('Anchor search distance locates a nearby feature; it is NOT the pass/fail tolerance. Equally close features remain unresolved.')
     if not (dxf and step):
@@ -89,7 +98,7 @@ def main():
     entity_dim = {i: key for i,e in enumerate(entities,1) for key,d in dimensions.items() if e is d}
     if not dimensions:
         st.error('NG — cannot verify: no native DXF DIMENSION entities. Exploded text/lines are not treated as dimensions.'); return
-    with st.expander('Drawing layers and view separation / レイヤー・ビュー分離'):
+    with st.expander('Drawing layers and view separation'):
         layers = list(analysis.layers)
         excluded = st.multiselect('Exclude annotation, centreline, border, or construction layers', layers,
                                   default=[x for x in layers if any(s in x.upper() for s in ['DEFPOINTS','CENTER','CENTRE','BORDER','TITLE'])])
@@ -99,7 +108,7 @@ def main():
     views = segment_views(filtered, gap_mm=gap)
     if not views:
         st.error('No comparable drawing views found.'); return
-    st.subheader('Views and dimensions / ビューと寸法')
+    st.subheader('2. Match figures and dimensions')
     st.caption('Select the actual projection or section for each view. Dark grey: DXF. Amber: STEP. Alignment is rigid; no automatic resizing.')
     prepared=[]; selections=[]; assigned=[]; errors=[]
     box=solid.BoundingBox()
@@ -134,7 +143,7 @@ def main():
                     cache[key]=project_visible(solid,name,hidden) if mode=='Projection' else section_shape(solid,axis,offset)
                 projection=align_projection(cache[key],drawing,rotation//90,dx,dy)
                 components.html(svg_overlay(drawing,projection),height=400)
-                confirmed=st.checkbox('This view/section and alignment match the drawing / 投影・断面と位置を確認',key=confirmation_key)
+                confirmed=st.checkbox('This view/section and alignment match the drawing',key=confirmation_key)
                 prepared.append((view.view_id,chosen,projection,drawing,confirmed and units_ok))
             except Exception as exc:
                 st.error(f'Cannot generate this view: {exc}')
@@ -142,7 +151,7 @@ def main():
             assigned.extend(chosen); selections.append(settings)
     run_signature=hashlib.sha256(json.dumps([signature,selections,use_general,general,association,[(p[0],p[4]) for p in prepared]],sort_keys=True).encode()).hexdigest()
     if st.session_state.get('report_signature') != run_signature: st.session_state.pop('report',None)
-    if st.button('Check dimensions / 寸法照合',type='primary'):
+    if st.button('Check dimensions',type='primary'):
         checks=[]
         for view_id,chosen,projection,drawing,confirmed in prepared:
             for key in chosen:
@@ -162,10 +171,17 @@ def main():
         st.session_state.update(report=payload,report_signature=run_signature)
     report=st.session_state.get('report')
     if report:
-        st.subheader('Dimension result / 寸法判定: '+report['result'])
+        st.subheader('3. Dimension result: '+report['result'])
+        total, passed, mismatch, unresolved = st.columns(4)
+        rows = report['checks']
+        total.metric('Dimensions', len(rows))
+        passed.metric('Within limits', sum(r['result']=='OK' for r in rows))
+        unresolved_count = sum(r['result']!='OK' and 'cannot verify' in r['reason'].lower() for r in rows)
+        mismatch.metric('Measured NG', sum(r['result']!='OK' for r in rows)-unresolved_count)
+        unresolved.metric('Cannot verify', unresolved_count)
         st.caption('NG distinguishes a measured mismatch from evidence that could not be verified. Undimensioned geometry is outside this result.')
         st.dataframe([{k:v for k,v in row.items() if k not in {'anchors','features'}} for row in report['checks']],use_container_width=True,hide_index=True)
-        with st.expander('Matched features / 照合箇所'):
+        with st.expander('Matched features'):
             for view_id,chosen,projection,drawing,confirmed in prepared:
                 evidence=[DimensionCheck(**row) for row in report['checks'] if row['view']==view_id]
                 st.write(view_id); components.html(svg_overlay(drawing,projection,evidence),height=400)

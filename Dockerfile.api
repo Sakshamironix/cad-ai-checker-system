@@ -1,0 +1,29 @@
+# CAD API container for the ChatGPT Sites dashboard.
+FROM mcr.microsoft.com/devcontainers/miniconda:1-3
+
+ARG CONDA_ENV=cad-ai-checker
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY environment.yml /tmp/environment.yml
+
+RUN conda env create --file /tmp/environment.yml \
+    && conda clean --all --yes
+
+WORKDIR /app
+COPY --chown=vscode:vscode . /app
+
+ENV CONDA_DEFAULT_ENV=${CONDA_ENV} \
+    PATH=/opt/conda/envs/${CONDA_ENV}/bin:${PATH} \
+    PORT=8000
+
+RUN echo "conda activate ${CONDA_ENV}" >> /home/vscode/.bashrc
+
+USER vscode
+RUN python -m pip install --no-cache-dir -r /app/requirements-api.txt
+
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD python -c "import os,urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:'+os.getenv('PORT','8000')+'/health',headers={'Authorization':'Bearer '+os.environ['CAD_API_KEY']}),timeout=4)"
+CMD ["sh", "-c", "python -m uvicorn app.cad_api:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --limit-concurrency 8"]

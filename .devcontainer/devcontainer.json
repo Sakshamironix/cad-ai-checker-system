@@ -21,17 +21,22 @@
     }
   },
   "forwardPorts": [
-    8501
+    8501,
+    8000
   ],
   "portsAttributes": {
     "8501": {
       "label": "Streamlit CAD AI Checker",
       "onAutoForward": "notify"
+    },
+    "8000": {
+      "label": "CAD processing API",
+      "onAutoForward": "silent"
     }
   },
-  "postCreateCommand": "python --version && python -c \"import cadquery, ezdxf, streamlit; print('CAD environment is ready')\"",
+  "postCreateCommand": "python -m pip install -r requirements-api.txt && python -c \"import cadquery, ezdxf, streamlit, fastapi; print('CAD dashboard and API environment ready')\"",
   "remoteEnv": {
     "PYTHONPATH": "${containerWorkspaceFolder}"
   },
-  "postStartCommand": "bash scripts/start-dashboard.sh"
+  "postStartCommand": "bash scripts/start-dashboard.sh && python scripts/run-cad-api.py"
 }
