@@ -23,7 +23,7 @@ from app.profile_comparison import _entity_primitives
 from app.drawing_interpreter import parse_checked_dimension_text, ParsedDimensionText, _normalize_text
 from app.runtime_limits import load_runtime_limits
 
-ENGINE_VERSION = '0.19.0-geometry'
+ENGINE_VERSION = '0.19.1-geometry'
 
 @dataclass(frozen=True)
 class DimensionCheck:
@@ -307,6 +307,67 @@ def linear_diameter_target(entity,drawing):
     return targets[0] if len(targets)==1 else None
 
 
+def simple_profile_roles(primitives):
+    """Prove a simple profile's topology, then name its geometric roles.
+
+    This is deliberately limited to concentric circles, axis-aligned rectangles
+    and capsules. No nominal text, search radius or resized model is involved.
+    Complex or changed topology must use the ordinary spatial association.
+    """
+    primitives=unique_primitives(tuple(p for p in primitives if p.kind not in {'circle','arc'})+circular_features(primitives))
+    if not primitives:return None
+    circles=[p for p in primitives if p.kind=='circle']
+    if len(circles)==len(primitives):
+        centre=point(circles[0].center)
+        if any(np.linalg.norm(point(p.center)-centre)>1e-7 for p in circles):return None
+        ordered=sorted(circles,key=lambda p:p.radius)
+        return ('concentric',len(ordered)),{},tuple(ordered)
+    lines=[p for p in primitives if p.kind=='line' and len(p.points)>=2]
+    arcs=[p for p in primitives if p.kind=='arc' and p.center is not None and p.radius is not None]
+    if len(lines)+len(arcs)!=len(primitives):return None
+    lo,hi=bounds(primitives)
+    if np.any(hi-lo<1e-7):return None
+    endpoints=[point(q) for p in primitives for q in (p.points[0],p.points[-1])]
+    # Every endpoint must join exactly one other edge endpoint.
+    if any(sum(np.linalg.norm(q-r)<1e-7 for r in endpoints)!=2 for q in endpoints):return None
+    if len(lines)==4 and not arcs:
+        if any(min(abs((point(p.points[-1])-point(p.points[0]))))>1e-7 for p in lines):return None
+        if any(not all(min(abs(q[i]-lo[i]),abs(q[i]-hi[i]))<1e-7 for i in (0,1)) for q in endpoints):return None
+        signature=('rectangle',)
+    elif len(lines)==2 and len(arcs)==2:
+        a,b=arcs
+        if abs(a.radius-b.radius)>1e-7 or a.radius<=0:return None
+        delta=point(b.center)-point(a.center)
+        if np.linalg.norm(delta)<1e-7 or min(abs(delta))>1e-7:return None
+        axis=int(np.argmax(abs(delta)))
+        for arc in arcs:
+            angles=np.unwrap([math.atan2(q.y-arc.center.y,q.x-arc.center.x) for q in arc.points])
+            if abs(float(max(angles)-min(angles))-math.pi)>1e-6:return None
+            for q in (arc.points[0],arc.points[-1]):
+                v=point(q)-point(arc.center)
+                if abs(v[axis])>1e-7 or abs(abs(v[1-axis])-arc.radius)>1e-7:return None
+        if any(abs((point(p.points[-1])-point(p.points[0]))[1-axis])>1e-7 for p in lines):return None
+        # The caps must point away from each other, forming an outer capsule.
+        for arc,other in ((a,b),(b,a)):
+            middle=point(arc.points[len(arc.points)//2])-point(arc.center)
+            if np.dot(middle,point(other.center)-point(arc.center))>=0:return None
+        signature=('capsule',axis)
+    else:return None
+    features=landmarks(primitives)
+    coordinates=[sorted(set(round(float(q[i]),7) for q,_ in features)) for i in (0,1)]
+    roles={}
+    for q,label in features:
+        role=tuple(coordinates[i].index(round(float(q[i]),7)) for i in (0,1))
+        roles[role]=(q,label+':topology')
+    return signature,roles,tuple(sorted(arcs,key=lambda p:float(point(p.center)[signature[1]]))) if arcs else (signature,roles,())
+
+
+def profile_correspondence(drawing,projected):
+    a,b=simple_profile_roles(drawing),simple_profile_roles(projected)
+    if a is None or b is None or a[0]!=b[0] or set(a[1])!=set(b[1]):return None
+    return a,b
+
+
 def measure_dimension(entity, projected, drawing, association_mm, linear_diameter=False):
     """Measure spatially selected geometry, never nearest nominal size."""
     code = int(entity.dxf.dimtype) & 15
@@ -316,8 +377,17 @@ def measure_dimension(entity, projected, drawing, association_mm, linear_diamete
         a, b = point(entity.dxf.defpoint2), point(entity.dxf.defpoint3)
         # Require anchors to refer to geometry in this DXF view as well.
         for q in (a, b): associate(q, landmarks(drawing), 1e-4)
-        pa, la = associate(a, landmarks(projected), association_mm)
-        pb, lb = associate(b, landmarks(projected), association_mm)
+        correspondence=profile_correspondence(drawing,projected)
+        if correspondence is not None and correspondence[0][1]:
+            source,destination=correspondence
+            def match(q):
+                roles=[role for role,(p,_) in source[1].items() if np.linalg.norm(q-p)<1e-4]
+                if len(roles)!=1:raise ValueError('Dimension anchor has no unique topological role.')
+                return destination[1][roles[0]]
+            pa,la=match(a);pb,lb=match(b)
+        else:
+            pa, la = associate(a, landmarks(projected), association_mm)
+            pb, lb = associate(b, landmarks(projected), association_mm)
         if np.linalg.norm(pa-pb) < 1e-7:
             raise ValueError('Both dimension anchors mapped to the same model location.')
         if code == 1: value = float(np.linalg.norm(pb-pa))
@@ -340,6 +410,17 @@ def measure_dimension(entity, projected, drawing, association_mm, linear_diamete
         if len(candidates) != 1:
             raise ValueError('Circular dimension does not identify one drawn circle/arc.')
         target = candidates[0]
+        correspondence=profile_correspondence(drawing,projected)
+        if correspondence is not None:
+            source,destination=correspondence
+            roles=[i for i,p in enumerate(source[2]) if p is target]
+            # circular_features creates new objects for joined semicircles.
+            if not roles:
+                roles=[i for i,p in enumerate(source[2]) if p.kind==target.kind and abs(p.radius-target.radius)<1e-7
+                       and np.linalg.norm(point(p.center)-point(target.center))<1e-7]
+            if len(roles)==1:
+                i=roles[0];p=destination[2][i]
+                return p.radius*(2 if code==3 else 1),(f'PROFILE:{source[0][0]}:circle-{i+1}:topology',),((p.center.x,p.center.y),)
         candidates = [(i, p) for i, p in enumerate(circular_features(projected), 1)
                       if (p.kind=='circle' or code==4 and p.kind=='arc') and p.center is not None and p.radius is not None
                       and np.linalg.norm(centre-[p.center.x,p.center.y]) <= association_mm

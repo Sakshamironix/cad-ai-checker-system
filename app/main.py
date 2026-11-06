@@ -68,7 +68,7 @@ def run_workspace():
         use_general = st.checkbox('Apply project tolerance where the drawing has no explicit limit', value=False)
         general = st.number_input('Project tolerance ± mm', min_value=.0001, value=.1, format='%.4f', disabled=not use_general)
         association = st.number_input('Maximum anchor search distance (mm)', min_value=.001, max_value=10., value=1., format='%.3f')
-        st.caption('Anchor search distance locates a nearby feature; it is NOT the pass/fail tolerance. Equally close features remain unresolved.')
+        st.caption('Simple rectangles, concentric circles and clean capsule profiles use geometric feature roles, even when sizes differ. Other profiles use the anchor search distance. It is NOT the pass/fail tolerance; ambiguous features remain unresolved.')
     comparison_mode='nominal' if basis=='Nominal dimensions' else 'limits'
     st.caption('Check basis: '+basis+'. Nominal matching uses 0.000001 mm numerical precision; it does not certify tolerance compliance.')
     if not (dxf and step):
@@ -153,7 +153,8 @@ def run_workspace():
                     cache[key]=project_visible(solid,name,hidden) if mode=='Projection' else section_shape(solid,axis,offset)
                 projection=align_projection(cache[key],drawing,rotation//90,dx,dy)
                 comparison_panels(drawing,projection)
-                confirmed=st.checkbox('This view/section and alignment match the drawing',key=confirmation_key)
+                st.caption('Confirm the corresponding figure and orientation, even if its dimensions differ. The STEP model is never resized to fit the drawing.')
+                confirmed=st.checkbox('This view/section corresponds to the drawing figure; orientation and position are confirmed',key=confirmation_key)
                 prepared.append((view.view_id,chosen,projection,drawing,confirmed and units_ok))
             except Exception as exc:
                 st.error(f'Cannot generate this view: {exc}')

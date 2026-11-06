@@ -84,3 +84,61 @@ def test_partial_arcs_never_become_a_full_circle():
     assert all(p.kind=='arc' for p in circular_features(arcs))
     lo,hi=bounds((arcs[0],))
     assert lo==pytest.approx([0,0],abs=1e-9) and hi==pytest.approx([2,2])
+
+
+@pytest.mark.parametrize('width,height',[(140,60),(20,15)])
+def test_changed_rectangle_geometry_retains_unscaled_model_measurement(width,height):
+    from app.geometry_check import project_visible
+    doc=ezdxf.new();m=doc.modelspace()
+    m.add_lwpolyline([(0,0),(width,0),(width,height),(0,height)],close=True)
+    d=m.add_linear_dim(base=(0,-5),p1=(0,0),p2=(width,0));d.render()
+    drawing=drawing_primitives(doc,{1})
+    solid=cq.Workplane('XY').box(80,60,10).val()
+    projected=align_projection(project_visible(solid,'top'),drawing)
+    row=check_dimension(d.dimension,'DIM-001','VIEW-01',projected,drawing,1,None,True,'nominal')
+    assert row.nominal==width and row.measured==pytest.approx(80)
+    assert row.result=='NG' and row.nominal_result=='Mismatch'
+    assert any('topology' in f for f in row.features)
+    assert projected.width==pytest.approx(80)  # no model scaling
+
+
+def test_changed_concentric_diameters_match_inner_and_outer_roles_not_nearest_size():
+    from app.geometry_check import project_visible
+    doc=ezdxf.new();m=doc.modelspace();m.add_circle((0,0),3);m.add_circle((0,0),10)
+    drawing=drawing_primitives(doc,{1,2})
+    projection=align_projection(project_visible(cq.Solid.makeTorus(2.5,1),'top'),drawing)
+    rows=[]
+    for r in (3,10):
+        d=m.add_diameter_dim(center=(0,0),radius=r,angle=30);d.render()
+        rows.append(check_dimension(d.dimension,'DIM','VIEW',projection,drawing,1,None,True,'nominal'))
+    assert [r.nominal for r in rows]==pytest.approx([6,20])
+    assert [r.measured for r in rows]==pytest.approx([3,7])
+    assert all(r.result=='NG' and r.nominal_result=='Mismatch' for r in rows)
+
+
+def test_changed_capsule_geometry_measures_real_straight_length_and_radius():
+    from app.geometry_check import project_visible
+    doc=ezdxf.new();m=doc.modelspace()
+    m.add_line((-4,-7),( -4,7));m.add_line((4,-7),(4,7))
+    m.add_arc((0,7),4,0,180);m.add_arc((0,-7),4,180,360)
+    drawing=drawing_primitives(doc,{1,2,3,4})
+    projection=align_projection(project_visible(cq.Workplane('XY').slot2D(7,2,angle=90).extrude(2).val(),'top'),drawing)
+    dims=[m.add_linear_dim(base=(7,0),p1=(4,-7),p2=(4,7),angle=90),
+          m.add_radius_dim(center=(0,7),radius=4,angle=45)]
+    rows=[]
+    for d in dims:
+        d.render();rows.append(check_dimension(d.dimension,'DIM','VIEW',projection,drawing,1,None,True,'nominal'))
+    assert [r.nominal for r in rows]==pytest.approx([14,4])
+    assert [r.measured for r in rows]==pytest.approx([5,1])
+    assert all(r.result=='NG' and r.nominal_result=='Mismatch' for r in rows)
+
+
+def test_different_topology_does_not_assign_an_unrelated_circle_by_size_rank():
+    from app.geometry_check import profile_correspondence,project_visible
+    doc=ezdxf.new();m=doc.modelspace();m.add_circle((0,0),10)
+    drawing=drawing_primitives(doc,{1})
+    projection=align_projection(project_visible(cq.Solid.makeTorus(2.5,1),'top'),drawing)
+    assert profile_correspondence(drawing,projection.primitives) is None
+    d=m.add_diameter_dim(center=(0,0),radius=10,angle=0);d.render()
+    row=check_dimension(d.dimension,'DIM','VIEW',projection,drawing,1,None,True,'nominal')
+    assert row.result=='NG' and row.measured is None and 'Cannot verify' in row.reason
