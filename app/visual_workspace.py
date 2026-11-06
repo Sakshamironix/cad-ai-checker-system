@@ -18,6 +18,7 @@ def header(version):
     h1,h2,h3,h4,p,label,[data-testid="stWidgetLabel"],.stCaption {color:#e9f3fa!important;}
     [data-testid="stCaptionContainer"] {color:#a2bece!important;}
     [data-testid="stFileUploader"] {padding:0;background:transparent;}
+    [data-testid="stFileUploader"] * {color:#d3e5ef!important;}
     [data-testid="stFileUploaderDropzone"] {background:#14354b;border:1px dashed #578198;border-radius:6px;}
     [data-testid="stFileUploaderDropzone"] * {color:#d1e4ef;}
     [data-baseweb="input"],[data-baseweb="select"]>div {background:#14354b!important;color:#e9f3fa!important;border-color:#426981!important;}
