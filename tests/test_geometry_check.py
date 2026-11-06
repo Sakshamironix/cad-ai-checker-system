@@ -164,3 +164,98 @@ def test_dashboard_upload_check_and_stale_report(tmp_path, monkeypatch):
     app.run(timeout=30)
     assert not app.exception
     assert 'report' not in app.session_state
+
+@pytest.mark.parametrize('text',['80 H7','80 MAX','80 +0.2','80 ±0.05 extra','M80','80 ±0,05'])
+def test_uninterpreted_callout_never_falls_back_to_project_tolerance(text):
+    doc,dim=rectangle_doc();dim.dxf.text=text
+    row=check(cq.Workplane('XY').box(80,60,10).val(),doc,dim,general=.1)
+    assert row.result=='NG' and 'Cannot verify' in row.reason
+    assert row.measured is None
+
+@pytest.mark.parametrize('text,model,expected',[
+    ('80 ±.05',80.04,'OK'),('80 ±.05',80.08,'NG'),
+    ('80 +.2/-.1',80.15,'OK'),('80 +.2/-.1',79.85,'NG'),
+    ('80 +.2/+.1',80.15,'OK'),('80 +.2/+.1',80.,'NG'),
+    ('79.9 / 80.2',80.2,'OK'),('79.9 / 80.2',80.21,'NG'),
+    ('80 %%p0.1',80.1,'OK'),('80 ±0',80.,'OK'),('80 ±0',80.0001,'NG')])
+def test_explicit_limits_and_decimal_tolerances(text,model,expected):
+    doc,dim=rectangle_doc();dim.dxf.text=text
+    row=check(cq.Workplane('XY').box(model,60,10).val(),doc,dim,general=.5)
+    assert row.result==expected
+    assert row.tolerance_source=='Explicit drawing tolerance'
+
+
+def test_scaled_and_non_xy_dimensions_cannot_pass():
+    doc,dim=rectangle_doc();shape=cq.Workplane('XY').box(80,60,10).val()
+    style=dim.override();style.update({'dimlfac':2});style.commit()
+    row=check(shape,doc,dim);assert row.result=='NG' and 'DIMLFAC' in row.reason
+    style.update({'dimlfac':1});style.commit();dim.dxf.extrusion=(0,1,0)
+    row=check(shape,doc,dim);assert row.result=='NG' and 'XY' in row.reason
+
+
+def test_real_arc_radius_and_wrong_sweep():
+    doc=ezdxf.new();doc.units=4;m=doc.modelspace();m.add_arc((0,0),5,0,90)
+    dim=m.add_radius_dim(center=(0,0),radius=5,angle=45,text='R5 ±.1');dim.render()
+    drawing=drawing_primitives(doc,{1})
+    edge=cq.Edge.makeCircle(5,angle1=0,angle2=90)
+    projection=project_step_shape(edge,'top')
+    assert projection.primitives[0].kind=='arc' and projection.circle_count==0
+    row=check_dimension(dim.dimension,'DIM-001','V',projection,drawing,1.,None,True)
+    assert row.result=='OK' and row.measured==pytest.approx(5)
+    wrong=project_step_shape(cq.Edge.makeCircle(5,angle1=180,angle2=270),'top')
+    row=check_dimension(dim.dimension,'DIM-001','V',wrong,drawing,1.,None,True)
+    assert row.result=='NG' and 'Cannot verify' in row.reason
+
+
+def test_nearly_face_on_circle_remains_elliptical():
+    edge=cq.Edge.makeCircle(5).rotate((0,0,0),(1,0,0),1)
+    assert project_step_shape(edge,'top').circle_count==0
+
+
+def test_step_import_keeps_all_root_shapes(monkeypatch):
+    shapes=[cq.Workplane('XY').box(80,60,10).val(),cq.Workplane('XY').box(4,4,4).translate((100,0,0)).val()]
+    monkeypatch.setattr(cq.importers,'importStep',lambda path:cq.Workplane().newObject(shapes))
+    result=load_solid(b'fixture-import')
+    assert len(result.Solids())==2 and result.BoundingBox().xmax==pytest.approx(102)
+
+@pytest.mark.parametrize('overrides',[{'dimpost':'M<>'},{'dimpost':'<> REF'},{'dimalt':1},{'dimlunit':4}])
+def test_native_style_semantics_cannot_be_ignored(overrides):
+    doc,dim=rectangle_doc();dim.dxf.text='<>'
+    style=dim.override();style.update(overrides);style.commit()
+    row=check(cq.Workplane('XY').box(80,60,10).val(),doc,dim,general=.1)
+    assert row.result=='NG' and 'Cannot verify' in row.reason
+
+
+def test_displayed_nominal_precision_is_used():
+    doc=ezdxf.new();doc.units=4;m=doc.modelspace()
+    m.add_lwpolyline([(0,0),(80.04,0),(80.04,60),(0,60)],close=True)
+    dim=m.add_linear_dim(base=(0,-5),p1=(0,0),p2=(80.04,0),text='<>',override={'dimdec':1});dim.render()
+    row=check(cq.Workplane('XY').box(80.12,60,10).val(),doc,dim.dimension,general=.1)
+    assert row.nominal==80.0 and row.result=='NG'
+
+
+def test_dimension_symbol_cannot_change_native_linear_semantics():
+    doc,dim=rectangle_doc();dim.dxf.text='Ø80 ±0.1'
+    row=check(cq.Workplane('XY').box(80,60,10).val(),doc,dim)
+    assert row.result=='NG' and 'native dimension type' in row.reason
+
+
+def test_invalid_native_tolerance_is_json_safe():
+    import json
+    doc,dim=rectangle_doc();dim.dxf.text='<>'
+    style=dim.override();style.update({'dimtol':1,'dimtp':float('inf')});style.commit()
+    row=check(cq.Workplane('XY').box(80,60,10).val(),doc,dim)
+    assert row.result=='NG' and 'invalid numeric' in row.reason
+    json.dumps(row.to_dict(),allow_nan=False)
+
+
+def test_nonplanar_drawing_cannot_be_silently_flattened():
+    doc=ezdxf.new();m=doc.modelspace();m.add_line((0,0,0),(80,0,2))
+    with pytest.raises(ValueError,match='not planar'):
+        drawing_primitives(doc,{1})
+
+
+def test_nonplanar_dimension_anchors_cannot_pass_xy_geometry():
+    doc,dim=rectangle_doc();dim.dxf.defpoint3=(40,-30,1)
+    row=check(cq.Workplane('XY').box(80,60,10).val(),doc,dim)
+    assert row.result=='NG' and 'anchors' in row.reason

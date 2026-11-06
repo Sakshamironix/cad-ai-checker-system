@@ -197,6 +197,35 @@ def parse_dimension_text(
     return ParsedDimensionText(nominal_value=nominal, tolerance=None)
 
 
+def parse_checked_dimension_text(text: str | None, measured_value: float | None) -> ParsedDimensionText:
+    """Strict dimension grammar for decisions; never ignore an unknown suffix."""
+    normalized = _normalize_text(text or '<>').replace('%%p', '±').replace('%%P', '±')
+    if not normalized:
+        normalized = '<>'
+    number = r'(?:\d+(?:\.\d*)?|\.\d+)'
+    signed = rf'[+-]?{number}'
+    limits = re.fullmatch(rf'({signed})\s*/\s*({signed})', normalized)
+    if limits:
+        lower, upper = sorted(float(v) for v in limits.groups())
+        nominal = measured_value if measured_value is not None else (lower+upper)/2
+        return ParsedDimensionText(nominal, Tolerance(lower-nominal, upper-nominal))
+    match = re.fullmatch(
+        rf'(?:⌀|Ø|R)?\s*(?P<nominal><>|{signed})'
+        rf'(?:\s*(?:(?:±|\+/-|\+-)\s*(?P<symmetric>{number})|'
+        rf'(?P<first>[+-]\s*{number})\s*/\s*(?P<second>[+-]\s*{number})))?',
+        normalized, flags=re.IGNORECASE)
+    if not match:
+        raise ValueError('Unsupported dimension text or tolerance notation; explicit interpretation is required.')
+    nominal = measured_value if match['nominal']=='<>' else float(match['nominal'])
+    tolerance = None
+    if match['symmetric'] is not None:
+        deviation=float(match['symmetric']); tolerance=Tolerance(-deviation,deviation)
+    elif match['first'] is not None:
+        lower, upper=sorted(float(match[k].replace(' ','')) for k in ('first','second'))
+        tolerance=Tolerance(lower,upper)
+    return ParsedDimensionText(nominal,tolerance)
+
+
 def _find_general_tolerance(notes: tuple[str, ...]) -> Tolerance | None:
     """Find the first supported general tolerance statement in drawing text."""
     for note in notes:

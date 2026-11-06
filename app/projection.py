@@ -141,7 +141,7 @@ def project_step_shape(shape: cq.Shape, view: str) -> StepProjection:
                 + float(axis.Y()) * direction[1]
                 + float(axis.Z()) * direction[2]
             )
-            if alignment >= 0.999 and abs(adaptor.LastParameter() - adaptor.FirstParameter() - 2 * math.pi) < 1e-6:
+            if alignment >= 0.999999999 and abs(adaptor.LastParameter() - adaptor.FirstParameter() - 2 * math.pi) < 1e-6:
                 location = circle.Location()
                 center = _project_xyz(
                     float(location.X()),
@@ -168,6 +168,11 @@ def project_step_shape(shape: cq.Shape, view: str) -> StepProjection:
                 continue
 
         points = _sample_edge(edge, view)
+        if curve_type == GeomAbs_Circle and alignment >= .999999999:
+            location = circle.Location()
+            center = _project_xyz(float(location.X()),float(location.Y()),float(location.Z()),view)
+            primitives.append(ProjectedPrimitive(kind='arc',points=points,center=center,radius=float(circle.Radius())))
+            continue
         if len(points) < 2:
             continue
         kind = "line" if curve_type == GeomAbs_Line else "curve"

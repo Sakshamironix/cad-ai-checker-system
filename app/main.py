@@ -18,6 +18,7 @@ from app.geometry_check import (ENGINE_VERSION, DimensionCheck, align_projection
 from app.dxf_reader import analyze_dxf_bytes
 from app.view_segmentation import segment_views
 from app.step_section import section_shape
+from app.visual_workspace import header, comparison_panels, svg_projection_sheet
 
 APP_NAME = 'CAD AI Checker'
 APP_STAGE = 'Geometry-based dimension verification'
@@ -51,21 +52,12 @@ def pdf_report(payload):
     c.save(); return buffer.getvalue()
 
 
-def main():
-    st.set_page_config(page_title=APP_NAME, layout='wide')
-    st.markdown('''<style>
-    .stApp {background:#f5f7fa;}
-    .block-container {max-width:1440px;padding-top:2rem;}
-    h1,h2,h3 {color:#132a40;}
-    [data-testid="stFileUploader"] {background:white;border:1px solid #dce3eb;border-radius:12px;padding:16px;}
-    [data-testid="stMetric"] {background:white;border:1px solid #dce3eb;border-radius:10px;padding:14px;}
-    .stButton>button[kind="primary"] {background:#156b77;border:0;}
-    </style>''', unsafe_allow_html=True)
-    st.title('CAD dimension checker')
-    st.caption('DXF drawing → STEP view or real section → feature measurement → dimension limits')
-    st.caption(f'{ENGINE_VERSION} · Checks assigned dimensions only; unsupported evidence is NG — cannot verify.')
-    st.subheader('1. Upload drawing and model')
+def run_workspace():
+    st.subheader('1. Select the two CAD files')
+    st.caption('1. 2つのCADファイルを選択')
     a,b = st.columns(2)
+    a.markdown('**2D DRAWING**  \n2D図面')
+    b.markdown('**3D MODEL**  \n3Dモデル')
     dxf = a.file_uploader('2D drawing (.dxf)', type=['dxf'])
     step = b.file_uploader('3D model (.step / .stp)', type=['step','stp'])
     with st.expander('Comparison settings'):
@@ -74,7 +66,10 @@ def main():
         association = st.number_input('Maximum anchor search distance (mm)', min_value=.001, max_value=10., value=1., format='%.3f')
         st.caption('Anchor search distance locates a nearby feature; it is NOT the pass/fail tolerance. Equally close features remain unresolved.')
     if not (dxf and step):
+        for key in ('report','input_signature','cad_doc','cad_solid','cad_analysis','projection_cache'):
+            st.session_state.pop(key,None)
         st.info('Upload both files. Select the corresponding view or cut plane, inspect alignment, then run the dimension check.')
+        st.button('Run CAD Check / CAD照合を実行',type='primary',use_container_width=True,disabled=True)
         return
     drawing_data, model_data = dxf.getvalue(), step.getvalue()
     signature = hashlib.sha256(drawing_data+model_data).hexdigest()
@@ -113,7 +108,9 @@ def main():
     prepared=[]; selections=[]; assigned=[]; errors=[]
     box=solid.BoundingBox()
     for view in views:
-        drawing = drawing_primitives(doc, set(view.entity_indexes), excluded)
+        try: drawing = drawing_primitives(doc, set(view.entity_indexes), excluded)
+        except ValueError as exc:
+            st.error(f'Cannot prepare {view.view_id}: {exc}'); return
         if not drawing: continue
         with st.expander(view.view_id, expanded=True):
             default=[entity_dim[i] for i in view.dimension_indexes if i in entity_dim]
@@ -142,7 +139,7 @@ def main():
                 if key not in cache:
                     cache[key]=project_visible(solid,name,hidden) if mode=='Projection' else section_shape(solid,axis,offset)
                 projection=align_projection(cache[key],drawing,rotation//90,dx,dy)
-                components.html(svg_overlay(drawing,projection),height=400)
+                comparison_panels(drawing,projection)
                 confirmed=st.checkbox('This view/section and alignment match the drawing',key=confirmation_key)
                 prepared.append((view.view_id,chosen,projection,drawing,confirmed and units_ok))
             except Exception as exc:
@@ -151,7 +148,7 @@ def main():
             assigned.extend(chosen); selections.append(settings)
     run_signature=hashlib.sha256(json.dumps([signature,selections,use_general,general,association,[(p[0],p[4]) for p in prepared]],sort_keys=True).encode()).hexdigest()
     if st.session_state.get('report_signature') != run_signature: st.session_state.pop('report',None)
-    if st.button('Check dimensions',type='primary'):
+    if st.button('Run CAD Check / CAD照合を実行',type='primary',use_container_width=True):
         checks=[]
         for view_id,chosen,projection,drawing,confirmed in prepared:
             for key in chosen:
@@ -192,6 +189,42 @@ def main():
         x.download_button('Download CSV',output.getvalue().encode('utf-8-sig'),'dimension-check.csv','text/csv')
         y.download_button('Download JSON',json.dumps(report,indent=2),'dimension-check.json','application/json')
         z.download_button('Download PDF',pdf_report(report),'dimension-check.pdf','application/pdf')
+
+
+def main():
+    st.set_page_config(page_title=APP_NAME, layout='wide')
+    header(ENGINE_VERSION)
+    run,model,drawing_tab=st.tabs(['Run CAD Check / CAD照合','Inspect 3D STEP/STP / 3D確認','Inspect 2D DXF / 2D確認'])
+    with run:
+        run_workspace()
+    with model:
+        st.subheader('3D model projections / 3Dモデルの投影')
+        solid=st.session_state.get('cad_solid')
+        if solid is None:st.info('Select the DXF and STEP files in Run CAD Check first.')
+        else:
+            st.caption('Six separate orthographic views at one common scale. The sheet layout does not change measurement coordinates.')
+            try:
+                cache=st.session_state.projection_cache
+                projections=[]
+                for name in ['front','right','rear','top','left','bottom']:
+                    key=('Projection',name,False)
+                    if key not in cache:cache[key]=project_visible(solid,name)
+                    projections.append(cache[key])
+                components.html(svg_projection_sheet(projections),height=560)
+            except Exception as exc:st.error(f'Cannot inspect model: {exc}')
+    with drawing_tab:
+        st.subheader('2D drawing figures / 2D図面の図')
+        doc=st.session_state.get('cad_doc');analysis=st.session_state.get('cad_analysis')
+        if doc is None:st.info('Select the DXF and STEP files in Run CAD Check first.')
+        else:
+            filtered=replace(analysis,entity_locations=tuple(x for x in analysis.entity_locations if x.entity_type in {'LINE','ARC','CIRCLE','LWPOLYLINE','POLYLINE','SPLINE','ELLIPSE'}))
+            from app.projection import StepProjection
+            for view in segment_views(filtered,gap_mm=2):
+                st.caption(view.view_id+' · Drawing geometry only; dimension annotations excluded')
+                try:
+                    primitives=drawing_primitives(doc,set(view.entity_indexes))
+                    components.html(svg_overlay(primitives,StepProjection('DXF',0,0,())),height=400)
+                except Exception as exc:st.error(str(exc))
 
 if __name__=='__main__':
     main()

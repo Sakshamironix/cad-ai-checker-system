@@ -20,10 +20,10 @@ from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Torus
 from app.projection import Point2D, ProjectedPrimitive, StepProjection, project_step_shape
 from app.profile_comparison import _entity_primitives
-from app.drawing_interpreter import parse_dimension_text
+from app.drawing_interpreter import parse_checked_dimension_text, ParsedDimensionText, _normalize_text
 from app.runtime_limits import load_runtime_limits
 
-ENGINE_VERSION = '0.18.0-geometry'
+ENGINE_VERSION = '0.18.2-geometry'
 
 @dataclass(frozen=True)
 class DimensionCheck:
@@ -61,7 +61,9 @@ def load_solid(data: bytes):
         raise ValueError('STEP is empty or exceeds the upload limit.')
     with NamedTemporaryFile(suffix='.step') as f:
         f.write(data); f.flush()
-        shape = cq.importers.importStep(f.name).val()
+        imported = cq.importers.importStep(f.name)
+        roots = imported.vals()
+        shape = roots[0] if len(roots)==1 else cq.Compound.makeCompound(roots)
     if not shape.Solids() or not shape.isValid():
         raise ValueError('A valid STEP solid is required.')
     return shape
@@ -126,20 +128,60 @@ def project_visible(shape, view: str, include_hidden: bool = False) -> StepProje
             if rank == 3 and np.ptp(radii) < 1e-7 and abs(abs(angles[-1]-angles[0])-2*math.pi) < 1e-6:
                 primitive = replace(primitive, kind='circle', center=Point2D(*centre), radius=float(radii.mean()))
         normalized.append(primitive)
-    return replace(p, view=view, primitives=tuple(normalized))
+    primitives = unique_primitives(normalized)
+    lo, hi = bounds(primitives)
+    return replace(p, view=view, primitives=primitives, width=float(hi[0]-lo[0]), height=float(hi[1]-lo[1]))
+
+
+def unique_primitives(primitives):
+    """Remove coincident HLR edges emitted by multiple visibility compounds.
+
+    Keep distinct arcs of the same circle. This is display/topology cleanup,
+    never a nominal-dimension or tolerance-based geometry merge.
+    """
+    result=[]; seen=set()
+    def point(q): return (round(q.x,7),round(q.y,7))
+    for p in primitives:
+        if p.kind=='circle' and p.center is not None:
+            key=('circle',point(p.center),round(p.radius,7))
+        elif p.kind=='line' and p.points:
+            key=('line',tuple(sorted([point(p.points[0]),point(p.points[-1])])) )
+        else:
+            samples=tuple(point(q) for q in p.points)
+            key=(p.kind,min(samples,samples[::-1]))
+        if key not in seen: result.append(p);seen.add(key)
+    return tuple(result)
 
 
 def bounds(primitives):
-    points = np.array([(p.x, p.y) for item in primitives for p in item.points])
+    coords=[(p.x,p.y) for item in primitives for p in item.points]
+    for item in primitives:
+        if item.kind=='circle' and item.center is not None:
+            x,y,r=item.center.x,item.center.y,item.radius
+            coords.extend([(x-r,y-r),(x+r,y+r)])
+    points = np.array(coords)
     if not len(points):
         raise ValueError('No drawing geometry selected. Check layer and view filters.')
     return points.min(axis=0), points.max(axis=0)
 
 
 def drawing_primitives(doc, indexes, excluded_layers=()):
-    return tuple(p for i, e in enumerate(doc.modelspace(), 1)
-                 if i in indexes and e.dxf.layer not in excluded_layers
-                 for p in _entity_primitives(e))
+    selected = [e for i,e in enumerate(doc.modelspace(),1) if i in indexes and e.dxf.layer not in excluded_layers]
+    elevations=[]
+    def validate_plane(entity):
+        if not np.allclose(tuple(entity.dxf.get('extrusion',(0,0,1))), (0,0,1), rtol=0, atol=1e-9):
+            raise ValueError('Non-XY drawing extrusion is not supported. Flatten the selected DXF view first.')
+        if entity.dxftype() in {'LWPOLYLINE','POLYLINE'}:
+            for virtual in entity.virtual_entities(): validate_plane(virtual)
+        elif entity.dxftype() in {'LINE','ARC','CIRCLE'}:
+            for name in ('start','end','center'):
+                if entity.dxf.hasattr(name): elevations.append(float(entity.dxf.get(name).z))
+        elif entity.dxftype()=='SPLINE':
+            elevations.extend(float(p[2]) for p in entity.control_points)
+    for entity in selected: validate_plane(entity)
+    if elevations and max(elevations)-min(elevations)>1e-7:
+        raise ValueError('The selected drawing view is not planar in XY. Flatten its geometry before checking.')
+    return tuple(p for e in selected for p in _entity_primitives(e))
 
 
 def align_projection(projection, drawing, quarter_turns=0, dx=0., dy=0.):
@@ -153,8 +195,10 @@ def align_projection(projection, drawing, quarter_turns=0, dx=0., dy=0.):
     low, _ = bounds(rotated); drawing_low, _ = bounds(drawing)
     shift = drawing_low - low + np.array([dx, dy])
     def move(p): return Point2D(p.x + shift[0], p.y + shift[1])
-    return replace(projection, primitives=tuple(replace(p, points=tuple(move(q) for q in p.points),
-                   center=move(p.center) if p.center else None) for p in rotated))
+    aligned=tuple(replace(p, points=tuple(move(q) for q in p.points),
+                   center=move(p.center) if p.center else None) for p in rotated)
+    lo,hi=bounds(aligned)
+    return replace(projection, primitives=aligned,width=float(hi[0]-lo[0]),height=float(hi[1]-lo[1]))
 
 
 def landmarks(primitives):
@@ -190,6 +234,16 @@ def associate(point, features, radius):
 def point(v): return np.array([float(v.x), float(v.y)])
 
 
+def circular_anchor_on_sweep(primitive, anchor):
+    if primitive.kind == 'circle': return True
+    if primitive.kind != 'arc' or primitive.center is None: return False
+    centre=np.array([primitive.center.x,primitive.center.y])
+    angles=np.unwrap([math.atan2(q.y-centre[1],q.x-centre[0]) for q in primitive.points])
+    angle=math.atan2(anchor[1]-centre[1],anchor[0]-centre[0])
+    low,high=min(angles),max(angles)
+    return any(low-1e-7 <= angle+shift*2*math.pi <= high+1e-7 for shift in range(-2,3))
+
+
 def measure_dimension(entity, projected, drawing, association_mm):
     """Measure spatially selected geometry, never nearest nominal size."""
     code = int(entity.dxf.dimtype) & 15
@@ -216,18 +270,20 @@ def measure_dimension(entity, projected, drawing, association_mm):
         # Select the DXF circle by centre AND the actual radial anchor, not its text.
         candidates = [p for p in drawing if p.center is not None and p.radius is not None
                       and np.linalg.norm(centre - [p.center.x, p.center.y]) < 1e-4
-                      and abs(np.linalg.norm(b-centre)-p.radius) < 1e-4]
+                      and abs(np.linalg.norm(b-centre)-p.radius) < 1e-4
+                      and (p.kind=='circle' if code==3 else circular_anchor_on_sweep(p,b))]
         if len(candidates) != 1:
             raise ValueError('Circular dimension does not identify one drawn circle/arc.')
         target = candidates[0]
         candidates = [(i, p) for i, p in enumerate(projected, 1)
-                      if p.kind == 'circle' and p.center is not None and p.radius is not None
+                      if (p.kind=='circle' or code==4 and p.kind=='arc') and p.center is not None and p.radius is not None
                       and np.linalg.norm(centre-[p.center.x,p.center.y]) <= association_mm
-                      and abs(target.radius-p.radius) <= association_mm]
+                      and abs(target.radius-p.radius) <= association_mm
+                      and circular_anchor_on_sweep(p,np.array([p.center.x,p.center.y])+(b-centre)*p.radius/target.radius)]
         if len(candidates) != 1:
             raise ValueError('Circular anchor has no unique corresponding projected circle. Select a face-on view or section.')
         i, p = candidates[0]
-        return p.radius * (2 if code == 3 else 1), (f'EDGE-{i:03d}:circle',), ((p.center.x, p.center.y),)
+        return p.radius * (2 if code == 3 else 1), (f'EDGE-{i:03d}:{p.kind}',), ((p.center.x, p.center.y),)
     raise ValueError('This dimension type is not supported by the initial geometry checker.')
 
 
@@ -237,7 +293,23 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
     raw = str(entity.dxf.get('text', '<>'))
     try: geometric_measure = float(entity.get_measurement())
     except (ValueError, TypeError, AttributeError): geometric_measure = None
-    parsed = parse_dimension_text(raw, geometric_measure)
+    text_error = None
+    effective_raw=raw
+    style=entity.override()
+    try:
+        if geometric_measure is not None and ('<>' in raw or not raw):
+            from ezdxf.render.dim_base import format_text
+            rounding=float(style.get('dimrnd',0))
+            if not math.isfinite(rounding) or rounding<0: raise ValueError('Invalid DXF rounding increment.')
+            displayed=format_text(geometric_measure,dimrnd=rounding or None,dimdec=int(style.get('dimdec',2)))
+            post=str(style.get('dimpost','') or '')
+            if post:
+                if post.count('<>')!=1: raise ValueError('Unsupported DXF dimension prefix/suffix format.')
+                displayed=post.replace('<>',displayed,1)
+            effective_raw=raw.replace('<>',displayed,1) if raw else displayed
+        parsed = parse_checked_dimension_text(effective_raw, geometric_measure)
+    except (ValueError,OverflowError) as exc:
+        parsed=ParsedDimensionText(None,None); text_error=str(exc)
     tolerance, source = parsed.tolerance, 'Explicit drawing tolerance'
     # Native DXF tolerance overrides take precedence over the optional project limit.
     if tolerance is None:
@@ -254,6 +326,26 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
     def row(measured, result, reason, features=(), anchors=()):
         return DimensionCheck(dimension_id, view, kind, parsed.nominal_value, measured, lower, upper,
                               result, reason, features, anchors, source if tolerance else 'Unavailable')
+    if text_error:
+        return row(None,'NG','Cannot verify: '+text_error)
+    style=entity.override()
+    if style.get('dimalt',0) or int(style.get('dimlunit',2))!=2:
+        return row(None,'NG','Cannot verify: dual-unit or non-decimal dimension formatting is not supported.')
+    prefix=_normalize_text(effective_raw).upper().lstrip()
+    if (prefix.startswith(('⌀','Ø')) and code!=3) or (prefix.startswith('R') and code!=4):
+        return row(None,'NG','Cannot verify: radius/diameter symbol conflicts with native dimension type.')
+    if not math.isclose(float(style.get('dimlfac',1)),1.,rel_tol=0,abs_tol=1e-12):
+        return row(None,'NG','Cannot verify: scaled DXF dimension (DIMLFAC) requires an explicit drawing scale.')
+    if not np.allclose(tuple(entity.dxf.get('extrusion',(0,0,1))),(0,0,1),rtol=0,atol=1e-9):
+        return row(None,'NG','Cannot verify: dimension is not in the supported XY drawing plane.')
+    anchor_names=('defpoint2','defpoint3') if code in (0,1) else ('defpoint','defpoint4') if code in (3,4) else ()
+    anchor_z=[float(entity.dxf.get(name).z) for name in anchor_names if entity.dxf.hasattr(name)]
+    if anchor_z and max(anchor_z)-min(anchor_z)>1e-7:
+        return row(None,'NG','Cannot verify: dimension anchors are not in one XY plane.')
+    if any(v is not None and not math.isfinite(v) for v in (parsed.nominal_value,lower,upper)) or (lower is not None and upper is not None and lower>upper):
+        parsed=ParsedDimensionText(parsed.nominal_value if parsed.nominal_value is not None and math.isfinite(parsed.nominal_value) else None,None)
+        lower=upper=None; tolerance=None
+        return row(None,'NG','Cannot verify: invalid numeric dimension or tolerance limits.')
     if not confirmed:
         return row(None, 'NG', 'Cannot verify: confirm the selected view/section and alignment.')
     if parsed.nominal_value is None:
