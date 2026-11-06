@@ -23,7 +23,7 @@ from app.profile_comparison import _entity_primitives
 from app.drawing_interpreter import parse_checked_dimension_text, ParsedDimensionText, _normalize_text
 from app.runtime_limits import load_runtime_limits
 
-ENGINE_VERSION = '0.19.1-geometry'
+ENGINE_VERSION = '0.19.2-geometry'
 
 @dataclass(frozen=True)
 class DimensionCheck:
@@ -442,12 +442,16 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
     text_error = None
     effective_raw=raw
     style=entity.override()
+    measurement_factor=1.
     try:
+        measurement_factor=float(style.get('dimlfac',1))
+        if not math.isfinite(measurement_factor) or measurement_factor<=0:
+            raise ValueError('DIMLFAC must be finite and positive; layout-specific negative factors are unsupported.')
         if geometric_measure is not None and ('<>' in raw or not raw):
             from ezdxf.render.dim_base import format_text
             rounding=float(style.get('dimrnd',0))
             if not math.isfinite(rounding) or rounding<0: raise ValueError('Invalid DXF rounding increment.')
-            displayed=format_text(geometric_measure,dimrnd=rounding or None,dimdec=int(style.get('dimdec',2)))
+            displayed=format_text(geometric_measure*measurement_factor,dimrnd=rounding or None,dimdec=int(style.get('dimdec',2)))
             post=str(style.get('dimpost','') or '')
             if post:
                 if post.count('<>')!=1: raise ValueError('Unsupported DXF dimension prefix/suffix format.')
@@ -471,6 +475,8 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
     upper = parsed.nominal_value+tolerance.upper_deviation if tolerance and parsed.nominal_value is not None else None
     nominal_result=tolerance_result='Not checked'
     def row(measured, result, reason, features=(), anchors=()):
+        if math.isfinite(measurement_factor) and measurement_factor>0 and not math.isclose(measurement_factor,1.,rel_tol=0,abs_tol=1e-12):
+            reason+=f' DXF DIMLFAC={measurement_factor:g} applies to generated drawing labels only; STEP measurements are unscaled.'
         return DimensionCheck(dimension_id, view, kind, parsed.nominal_value, measured, lower, upper,
                               result, reason, features, anchors, source if tolerance else 'Unavailable',nominal_result,tolerance_result)
     if text_error:
@@ -483,8 +489,6 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
     if linear_diameter:kind='diameter'
     if (prefix.startswith(('⌀','Ø')) and code!=3 and not linear_diameter) or (prefix.startswith('R') and code!=4):
         return row(None,'NG','Cannot verify: radius/diameter symbol conflicts with native dimension type.')
-    if not math.isclose(float(style.get('dimlfac',1)),1.,rel_tol=0,abs_tol=1e-12):
-        return row(None,'NG','Cannot verify: scaled DXF dimension (DIMLFAC) requires an explicit drawing scale.')
     if not np.allclose(tuple(entity.dxf.get('extrusion',(0,0,1))),(0,0,1),rtol=0,atol=1e-9):
         return row(None,'NG','Cannot verify: dimension is not in the supported XY drawing plane.')
     anchor_names=('defpoint2','defpoint3') if code in (0,1) else ('defpoint','defpoint4') if code in (3,4) else ()

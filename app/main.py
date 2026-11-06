@@ -96,6 +96,9 @@ def run_workspace():
     else: units_ok = True
     entities = list(doc.modelspace())
     dimensions = {f'DIM-{i:03d}': e for i,e in enumerate((e for e in entities if e.dxftype()=='DIMENSION'),1)}
+    factors=sorted({float(e.override().get('dimlfac',1)) for e in dimensions.values() if float(e.override().get('dimlfac',1))!=1.})
+    if factors:
+        st.warning('DXF dimension display factor (DIMLFAC): '+', '.join(f'{factor:g}' for factor in factors)+'. Generated drawing labels use this factor; STEP measurements remain unscaled. Confirm any intended drawing/detail scale separately.')
     entity_dim = {i: key for i,e in enumerate(entities,1) for key,d in dimensions.items() if e is d}
     if not dimensions:
         st.error('NG — cannot verify: no native DXF DIMENSION entities. Exploded text/lines are not treated as dimensions.'); return

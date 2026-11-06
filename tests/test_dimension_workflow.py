@@ -142,3 +142,24 @@ def test_different_topology_does_not_assign_an_unrelated_circle_by_size_rank():
     d=m.add_diameter_dim(center=(0,0),radius=10,angle=0);d.render()
     row=check_dimension(d.dimension,'DIM','VIEW',projection,drawing,1,None,True,'nominal')
     assert row.result=='NG' and row.measured is None and 'Cannot verify' in row.reason
+
+
+def test_half_factor_reads_displayed_labels_without_halving_model_measurements(ring_pair):
+    doc=load_drawing(ring_pair[0])
+    for d in doc.modelspace().query('DIMENSION'):
+        overrides=d.override();overrides.update({'dimlfac':.5,'dimdec':2});overrides.commit()
+    stream=StringIO();doc.write(stream)
+    _,_,rows=inspect_pair((stream.getvalue().encode(),ring_pair[1]))
+    assert len(rows)==4
+    assert sorted(r.nominal for r in rows)==pytest.approx([.5,1.5,2.5,3.5])
+    assert sorted(r.measured for r in rows)==pytest.approx([1,3,5,7])
+    assert all(r.result=='NG' and r.nominal_result=='Mismatch' and 'DIMLFAC=0.5' in r.reason for r in rows)
+
+
+@pytest.mark.parametrize('factor',[0,-.5,float('inf'),float('nan')])
+def test_invalid_or_layout_specific_factors_do_not_pass(ring_pair,factor):
+    doc=load_drawing(ring_pair[0]);d=list(doc.modelspace().query('DIMENSION'))[0]
+    overrides=d.override();overrides.update({'dimlfac':factor});overrides.commit()
+    from app.geometry_check import StepProjection
+    row=check_dimension(d,'DIM','VIEW',StepProjection('top',0,0,()),(),confirmed=True,comparison_mode='nominal')
+    assert row.result=='NG' and 'DIMLFAC' in row.reason and row.measured is None

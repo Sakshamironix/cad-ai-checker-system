@@ -185,10 +185,10 @@ def test_explicit_limits_and_decimal_tolerances(text,model,expected):
     assert row.tolerance_source=='Explicit drawing tolerance'
 
 
-def test_scaled_and_non_xy_dimensions_cannot_pass():
+def test_explicit_dimension_text_is_not_multiplied_and_non_xy_cannot_pass():
     doc,dim=rectangle_doc();shape=cq.Workplane('XY').box(80,60,10).val()
     style=dim.override();style.update({'dimlfac':2});style.commit()
-    row=check(shape,doc,dim);assert row.result=='NG' and 'DIMLFAC' in row.reason
+    row=check(shape,doc,dim);assert row.result=='OK' and row.nominal==80 and row.measured==pytest.approx(80) and 'DIMLFAC' in row.reason
     style.update({'dimlfac':1});style.commit();dim.dxf.extrusion=(0,1,0)
     row=check(shape,doc,dim);assert row.result=='NG' and 'XY' in row.reason
 
