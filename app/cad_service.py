@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
 from app.geometry_check import (ENGINE_VERSION, DimensionCheck, load_drawing, load_solid,
-    drawing_primitives, project_visible, align_projection, check_dimension, overall_result, svg_overlay)
+    drawing_primitives, project_visible, align_projection, check_dimension, overall_result, svg_overlay,unresolved_dimension)
 from app.dxf_reader import analyze_dxf_bytes
 from app.view_segmentation import segment_views
 from app.step_section import section_shape
@@ -59,7 +59,7 @@ def process(operation, dxf_data, step_data, settings, names):
             for key in selection['dimensions']:
                 if assigned.count(key)==1:
                     local.append(check_dimension(dimensions[key],key,view.view_id,projection,drawing,
-                        settings['association'],settings['general_tolerance'],confirmed))
+                        settings['association'],settings['general_tolerance'],confirmed,settings.get('comparison_mode','limits')))
             checks.extend(local)
         previews.append({'view_id':view.view_id,'svg':svg_overlay(drawing,projection,local)})
     if operation == 'preview':
@@ -68,11 +68,12 @@ def process(operation, dxf_data, step_data, settings, names):
     for key in dimensions:
         if key not in checked:
             reason = 'Assigned to multiple views.' if assigned.count(key)>1 else 'Not assigned to a usable drawing view.'
-            checks.append(DimensionCheck(key,'Unassigned','unknown',None,None,None,None,'NG','Cannot verify: '+reason))
+            checks.append(unresolved_dimension(dimensions[key],key,reason))
     return {'previews':previews,'report':{'engine':ENGINE_VERSION,'generated_at':datetime.now(timezone.utc).isoformat(),
         **names,'drawing_sha256':hashlib.sha256(dxf_data).hexdigest(),'model_sha256':hashlib.sha256(step_data).hexdigest(),
         'result':overall_result(checks),'scope':'Native assigned dimensions only; not full-shape or GD&T certification.',
         'general_tolerance_mm':settings['general_tolerance'],'association_mm':settings['association'],
+        'comparison_mode':settings.get('comparison_mode','limits'),
         'views':selections,'checks':[c.to_dict() for c in sorted(checks,key=lambda c:c.dimension)]}}
 
 

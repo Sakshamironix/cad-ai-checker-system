@@ -129,6 +129,7 @@ class DimensionFeature:
     text_position: Point2D | None = None
     extension_line_start: Point2D | None = None
     extension_line_end: Point2D | None = None
+    circular_reference: Point2D | None = None
 
 
 @dataclass(frozen=True)
@@ -336,6 +337,7 @@ def analyze_dxf_file(file_path: str | Path, source_name: str | None = None) -> D
                     text_position=_point(getattr(entity.dxf, "text_midpoint", None)),
                     extension_line_start=_point(getattr(entity.dxf, "defpoint2", None)),
                     extension_line_end=_point(getattr(entity.dxf, "defpoint3", None)),
+                    circular_reference=_point(getattr(entity.dxf, "defpoint4", None)),
                 )
             )
         elif entity_type in {"TEXT", "MTEXT"}:

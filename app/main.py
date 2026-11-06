@@ -14,7 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from app.geometry_check import (ENGINE_VERSION, DimensionCheck, align_projection,
     check_dimension, drawing_primitives, load_drawing, load_solid, overall_result,
-    project_visible, svg_overlay)
+    project_visible, svg_overlay,unresolved_dimension,suggest_projection)
 from app.dxf_reader import analyze_dxf_bytes
 from app.view_segmentation import segment_views
 from app.step_section import section_shape
@@ -37,12 +37,14 @@ def pdf_report(payload):
     lines = [f"CAD dimension verification — {payload['result']}",
              f"Engine: {ENGINE_VERSION} | UTC: {payload['generated_at']}",
              f"Drawing: {payload['drawing']} | Model: {payload['model']}",
+             'Check basis: '+payload.get('comparison_mode','limits'),
              'Scope: assigned dimensions only. Not full shape or GD&T certification.',
              f"DXF SHA256: {payload['drawing_sha256']}", f"STEP SHA256: {payload['model_sha256']}", '']
     for row in payload['checks']:
         lines.extend([f"{row['dimension']} | {row['view']} | {row['kind']} | {row['result']}",
                       f"Nominal: {row['nominal']}  Model: {row['measured']}  Limits: {row['lower']} to {row['upper']}",
                       f"Tolerance source: {row['tolerance_source']}",
+                      f"Nominal comparison: {row.get('nominal_result','Not checked')} | Tolerance: {row.get('tolerance_result','Not checked')}",
                       f"Features: {', '.join(row['features'])}", row['reason'], ''])
     lines += ['View and section settings:', json.dumps(payload['views'], ensure_ascii=True)]
     for text in lines:
@@ -61,10 +63,14 @@ def run_workspace():
     dxf = a.file_uploader('2D drawing (.dxf)', type=['dxf'])
     step = b.file_uploader('3D model (.step / .stp)', type=['step','stp'])
     with st.expander('Comparison settings'):
+        basis=st.radio('Check basis',['Nominal dimensions','Tolerance limits'],horizontal=True,
+                       help='Nominal mode compares the stated dimension value. Tolerance mode requires explicit drawing limits or an enabled project rule.')
         use_general = st.checkbox('Apply project tolerance where the drawing has no explicit limit', value=False)
         general = st.number_input('Project tolerance ± mm', min_value=.0001, value=.1, format='%.4f', disabled=not use_general)
         association = st.number_input('Maximum anchor search distance (mm)', min_value=.001, max_value=10., value=1., format='%.3f')
         st.caption('Anchor search distance locates a nearby feature; it is NOT the pass/fail tolerance. Equally close features remain unresolved.')
+    comparison_mode='nominal' if basis=='Nominal dimensions' else 'limits'
+    st.caption('Check basis: '+basis+'. Nominal matching uses 0.000001 mm numerical precision; it does not certify tolerance compliance.')
     if not (dxf and step):
         for key in ('report','input_signature','cad_doc','cad_solid','cad_analysis','projection_cache'):
             st.session_state.pop(key,None)
@@ -72,7 +78,7 @@ def run_workspace():
         st.button('Run CAD Check / CAD照合を実行',type='primary',use_container_width=True,disabled=True)
         return
     drawing_data, model_data = dxf.getvalue(), step.getvalue()
-    signature = hashlib.sha256(drawing_data+model_data).hexdigest()
+    signature = hashlib.sha256(drawing_data+model_data+ENGINE_VERSION.encode()).hexdigest()
     if st.session_state.get('input_signature') != signature:
         st.session_state.pop('report', None)
         try:
@@ -103,6 +109,10 @@ def run_workspace():
     views = segment_views(filtered, gap_mm=gap)
     if not views:
         st.error('No comparable drawing views found.'); return
+    with st.expander(f'Drawing dimensions detected: {len(dimensions)}',expanded=True):
+        st.dataframe([{'Dimension':key,'Drawing nominal':unresolved_dimension(e,key,'Not measured yet.').nominal,
+                       'Figure':next((v.view_id for v in views if any(entity_dim.get(i)==key for i in v.dimension_indexes)),'Unassigned')}
+                      for key,e in dimensions.items()],hide_index=True,use_container_width=True)
     st.subheader('2. Match figures and dimensions')
     st.caption('Select the actual projection or section for each view. Dark grey: DXF. Amber: STEP. Alignment is rigid; no automatic resizing.')
     prepared=[]; selections=[]; assigned=[]; errors=[]
@@ -119,7 +129,10 @@ def run_workspace():
             mode=c1.selectbox('STEP geometry', ['Projection','Section'],key=view.view_id+'mode')
             offset=None; axis=None; hidden=False
             if mode=='Projection':
-                name=c2.selectbox('View', ['top','front','right','bottom','rear','left'], key=view.view_id+'source')
+                names=['top','front','right','bottom','rear','left']
+                suggested=suggest_projection(solid,drawing,st.session_state.projection_cache)
+                name=c2.selectbox('View',names,index=names.index(suggested),key=signature+view.view_id+'source')
+                st.caption('Initial view suggested from outline geometry. Inspect and confirm it; equal outlines do not establish feature correspondence.')
                 hidden=c3.checkbox('Include hidden edges',key=view.view_id+'hidden')
             else:
                 axis=c2.selectbox('Cut normal',list('XYZ'),key=view.view_id+'axis')
@@ -146,24 +159,27 @@ def run_workspace():
                 st.error(f'Cannot generate this view: {exc}')
                 if chosen: errors.extend(chosen)
             assigned.extend(chosen); selections.append(settings)
-    run_signature=hashlib.sha256(json.dumps([signature,selections,use_general,general,association,[(p[0],p[4]) for p in prepared]],sort_keys=True).encode()).hexdigest()
+    st.caption(f'{len(dimensions)} dimensions found · {len(set(assigned))} assigned · {sum(p[4] for p in prepared)} of {len(prepared)} figure alignments confirmed.')
+    st.info('Confirm the drawing units and each matching figure alignment for a verified judgement. Unconfirmed measurements are shown as preliminary.')
+    run_signature=hashlib.sha256(json.dumps([signature,selections,comparison_mode,use_general,general,association,[(p[0],p[4]) for p in prepared]],sort_keys=True).encode()).hexdigest()
     if st.session_state.get('report_signature') != run_signature: st.session_state.pop('report',None)
     if st.button('Run CAD Check / CAD照合を実行',type='primary',use_container_width=True):
         checks=[]
         for view_id,chosen,projection,drawing,confirmed in prepared:
             for key in chosen:
                 if assigned.count(key)>1: continue
-                checks.append(check_dimension(dimensions[key],key,view_id,projection,drawing,association,general if use_general else None,confirmed))
+                checks.append(check_dimension(dimensions[key],key,view_id,projection,drawing,association,general if use_general else None,confirmed,comparison_mode))
         checked={c.dimension for c in checks}
         for key in dimensions:
             if key not in checked:
                 reason='Assigned to multiple views.' if assigned.count(key)>1 else 'View generation failed.' if key in errors else 'Not assigned to a usable drawing view.'
-                checks.append(DimensionCheck(key,'Unassigned','unknown',None,None,None,None,'NG','Cannot verify: '+reason))
+                checks.append(unresolved_dimension(dimensions[key],key,reason))
         payload={'engine':ENGINE_VERSION,'generated_at':datetime.now(timezone.utc).isoformat(),
                  'drawing':dxf.name,'model':step.name,'drawing_sha256':hashlib.sha256(drawing_data).hexdigest(),
                  'model_sha256':hashlib.sha256(model_data).hexdigest(),'result':overall_result(checks),
                  'scope':'Native assigned dimensions only; not full-shape or GD&T certification.',
                  'general_tolerance_mm':general if use_general else None,'association_mm':association,
+                 'comparison_mode':comparison_mode,
                  'views':selections,'checks':[c.to_dict() for c in sorted(checks,key=lambda x:x.dimension)]}
         st.session_state.update(report=payload,report_signature=run_signature)
     report=st.session_state.get('report')
@@ -172,12 +188,17 @@ def run_workspace():
         total, passed, mismatch, unresolved = st.columns(4)
         rows = report['checks']
         total.metric('Dimensions', len(rows))
-        passed.metric('Within limits', sum(r['result']=='OK' for r in rows))
+        passed.metric('Nominal matches' if report['comparison_mode']=='nominal' else 'Within limits',sum(r['result']=='OK' for r in rows))
         unresolved_count = sum(r['result']!='OK' and 'cannot verify' in r['reason'].lower() for r in rows)
         mismatch.metric('Measured NG', sum(r['result']!='OK' for r in rows)-unresolved_count)
         unresolved.metric('Cannot verify', unresolved_count)
         st.caption('NG distinguishes a measured mismatch from evidence that could not be verified. Undimensioned geometry is outside this result.')
-        st.dataframe([{k:v for k,v in row.items() if k not in {'anchors','features'}} for row in report['checks']],use_container_width=True,hide_index=True)
+        st.caption('Result basis: '+report['comparison_mode']+'. Missing limits are shown as Not specified; no tolerance is invented.')
+        st.dataframe([{'Dimension':row['dimension'],'Figure':row['view'],'Type':row['kind'],
+                       'Drawing nominal (mm)':row['nominal'],'Model measurement (mm)':row['measured'],
+                       'Difference (mm)':row['measured']-row['nominal'] if row['measured'] is not None and row['nominal'] is not None else None,
+                       'Nominal':row.get('nominal_result','Not checked'),'Tolerance':row.get('tolerance_result','Not checked'),
+                       'Result':row['result'],'Reason':row['reason']} for row in report['checks']],use_container_width=True,hide_index=True)
         with st.expander('Matched features'):
             for view_id,chosen,projection,drawing,confirmed in prepared:
                 evidence=[DimensionCheck(**row) for row in report['checks'] if row['view']==view_id]

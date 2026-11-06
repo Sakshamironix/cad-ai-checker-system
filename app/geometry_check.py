@@ -23,7 +23,7 @@ from app.profile_comparison import _entity_primitives
 from app.drawing_interpreter import parse_checked_dimension_text, ParsedDimensionText, _normalize_text
 from app.runtime_limits import load_runtime_limits
 
-ENGINE_VERSION = '0.18.2-geometry'
+ENGINE_VERSION = '0.19.0-geometry'
 
 @dataclass(frozen=True)
 class DimensionCheck:
@@ -39,6 +39,8 @@ class DimensionCheck:
     features: tuple[str, ...] = ()
     anchors: tuple[tuple[float, float], ...] = ()
     tolerance_source: str = 'Unavailable'
+    nominal_result: str = 'Not checked'
+    tolerance_result: str = 'Not checked'
     def to_dict(self):
         return asdict(self)
 
@@ -92,12 +94,22 @@ def project_visible(shape, view: str, include_hidden: bool = False) -> StepProje
     if not shapes:
         raise ValueError('The selected STEP view contains no projected edges.')
     p = project_step_shape(cq.Compound.makeCompound(shapes), 'top')
-    analytic_circles = []
+    analytic_circles = []; analytic_caps=[]
     yaxis = np.cross(normal, xaxis)
     for face in shape.Faces():
         surface = BRepAdaptor_Surface(face.wrapped)
         if surface.GetType() != GeomAbs_Torus:
             continue
+        torus = surface.Torus(); direction = torus.Axis().Direction()
+        axis=np.array([direction.X(),direction.Y(),direction.Z()]); c=torus.Location();xyz=np.array([c.X(),c.Y(),c.Z()])
+        # Side-on torus silhouettes have circular end caps even if HLR emits
+        # approximate B-splines. Recover only from the analytic surface and
+        # observed edge samples; trimmed angular coverage remains unchanged.
+        if abs(np.dot(axis,normal))<1e-9:
+            radial=np.cross(axis,normal);radial/=np.linalg.norm(radial)
+            for sign in (-1,1):
+                cap=xyz+sign*torus.MajorRadius()*radial
+                analytic_caps.append((np.array([np.dot(cap,xaxis),np.dot(cap,yaxis)]),torus.MinorRadius()))
         if any(abs(upper-lower-2*math.pi) > 1e-6 for lower,upper in
                [(surface.FirstUParameter(),surface.LastUParameter()),
                 (surface.FirstVParameter(),surface.LastVParameter())]):
@@ -114,6 +126,12 @@ def project_visible(shape, view: str, include_hidden: bool = False) -> StepProje
     normalized = []
     for primitive in p.primitives:
         pts = np.array([(q.x, q.y) for q in primitive.points])
+        if primitive.kind=='curve' and len(pts)>=8:
+            candidates={(tuple(np.round(centre,9)),round(radius,9)) for centre,radius in analytic_caps
+                        if np.max(np.abs(np.linalg.norm(pts-centre,axis=1)-radius))<1e-3}
+            if len(candidates)==1:
+                centre,radius=next(iter(candidates))
+                primitive=replace(primitive,kind='arc',center=Point2D(*centre),radius=radius)
         if primitive.kind == 'curve' and len(pts) >= 32 and np.linalg.norm(pts[0]-pts[-1]) < 1e-7:
             # HLR torus outlines can be approximate B-splines. Recover the
             # exact circle only from the corresponding analytic STEP surface.
@@ -159,6 +177,10 @@ def bounds(primitives):
         if item.kind=='circle' and item.center is not None:
             x,y,r=item.center.x,item.center.y,item.radius
             coords.extend([(x-r,y-r),(x+r,y+r)])
+        elif item.kind=='arc' and item.center is not None:
+            for angle in (0,math.pi/2,math.pi,3*math.pi/2):
+                q=np.array([item.center.x+item.radius*math.cos(angle),item.center.y+item.radius*math.sin(angle)])
+                if circular_anchor_on_sweep(item,q):coords.append(tuple(q))
     points = np.array(coords)
     if not len(points):
         raise ValueError('No drawing geometry selected. Check layer and view filters.')
@@ -244,10 +266,51 @@ def circular_anchor_on_sweep(primitive, anchor):
     return any(low-1e-7 <= angle+shift*2*math.pi <= high+1e-7 for shift in range(-2,3))
 
 
-def measure_dimension(entity, projected, drawing, association_mm):
+def circular_features(primitives):
+    """Join analytic arcs only when their angular union proves a full circle."""
+    from app.projection import ProjectedPrimitive
+    groups={}
+    for p in primitives:
+        if p.kind not in {'circle','arc'} or p.center is None or p.radius is None:continue
+        key=(round(p.center.x,7),round(p.center.y,7),round(p.radius,7))
+        groups.setdefault(key,[]).append(p)
+    result=[]
+    tau=2*math.pi
+    for group in groups.values():
+        if any(p.kind=='circle' for p in group):
+            result.append(next(p for p in group if p.kind=='circle'));continue
+        intervals=[]
+        for p in group:
+            angles=np.unwrap([math.atan2(q.y-p.center.y,q.x-p.center.x) for q in p.points])
+            if len(angles)<2:continue
+            lo,hi=float(min(angles)),float(max(angles));length=hi-lo;lo%=tau;hi=lo+length
+            intervals.append((lo,min(hi,tau)))
+            if hi>tau:intervals.append((0,hi-tau))
+        merged=[]
+        for lo,hi in sorted(intervals):
+            if merged and lo<=merged[-1][1]+1e-7:merged[-1]=(merged[-1][0],max(hi,merged[-1][1]))
+            else:merged.append((lo,hi))
+        if merged and merged[0][0]<1e-7 and merged[-1][1]>tau-1e-7 and sum(b-a for a,b in merged)>tau-1e-7:
+            p=group[0];points=tuple(Point2D(p.center.x+p.radius*math.cos(t),p.center.y+p.radius*math.sin(t)) for t in np.linspace(0,tau,97))
+            result.append(ProjectedPrimitive('circle',points,p.center,p.radius))
+        else:result.extend(group)
+    return tuple(result)
+
+
+def linear_diameter_target(entity,drawing):
+    """A linear Ø callout is valid only with opposite anchors on a drawn circle."""
+    if not entity.dxf.hasattr('defpoint2') or not entity.dxf.hasattr('defpoint3'):return None
+    a,b=point(entity.dxf.defpoint2),point(entity.dxf.defpoint3);centre=(a+b)/2
+    targets=[p for p in circular_features(drawing) if p.kind=='circle'
+             and np.linalg.norm(centre-[p.center.x,p.center.y])<1e-4
+             and abs(np.linalg.norm(b-a)-2*p.radius)<1e-4]
+    return targets[0] if len(targets)==1 else None
+
+
+def measure_dimension(entity, projected, drawing, association_mm, linear_diameter=False):
     """Measure spatially selected geometry, never nearest nominal size."""
     code = int(entity.dxf.dimtype) & 15
-    if code in (0, 1):
+    if code in (0, 1) and not linear_diameter:
         if not entity.dxf.hasattr('defpoint2') or not entity.dxf.hasattr('defpoint3'):
             raise ValueError('Dimension extension-line origins are missing.')
         a, b = point(entity.dxf.defpoint2), point(entity.dxf.defpoint3)
@@ -262,20 +325,22 @@ def measure_dimension(entity, projected, drawing, association_mm):
             angle = math.radians(float(entity.dxf.get('angle', 0)))
             value = abs(float(np.dot(pb-pa, [math.cos(angle), math.sin(angle)])))
         return value, (la, lb), (tuple(pa), tuple(pb))
-    if code in (3, 4):
-        if not entity.dxf.hasattr('defpoint4'):
+    if code in (3, 4) or linear_diameter:
+        if not linear_diameter and not entity.dxf.hasattr('defpoint4'):
             raise ValueError('Circular dimension reference points are missing.')
-        a, b = point(entity.dxf.defpoint), point(entity.dxf.defpoint4)
+        if linear_diameter:
+            a,b=point(entity.dxf.defpoint2),point(entity.dxf.defpoint3);code=3
+        else:a, b = point(entity.dxf.defpoint), point(entity.dxf.defpoint4)
         centre = (a+b)/2 if code == 3 else a
         # Select the DXF circle by centre AND the actual radial anchor, not its text.
-        candidates = [p for p in drawing if p.center is not None and p.radius is not None
+        candidates = [p for p in circular_features(drawing) if p.center is not None and p.radius is not None
                       and np.linalg.norm(centre - [p.center.x, p.center.y]) < 1e-4
                       and abs(np.linalg.norm(b-centre)-p.radius) < 1e-4
                       and (p.kind=='circle' if code==3 else circular_anchor_on_sweep(p,b))]
         if len(candidates) != 1:
             raise ValueError('Circular dimension does not identify one drawn circle/arc.')
         target = candidates[0]
-        candidates = [(i, p) for i, p in enumerate(projected, 1)
+        candidates = [(i, p) for i, p in enumerate(circular_features(projected), 1)
                       if (p.kind=='circle' or code==4 and p.kind=='arc') and p.center is not None and p.radius is not None
                       and np.linalg.norm(centre-[p.center.x,p.center.y]) <= association_mm
                       and abs(target.radius-p.radius) <= association_mm
@@ -287,7 +352,7 @@ def measure_dimension(entity, projected, drawing, association_mm):
     raise ValueError('This dimension type is not supported by the initial geometry checker.')
 
 
-def check_dimension(entity, dimension_id, view, projection, drawing, association_mm=1., general_tolerance=None, confirmed=False):
+def check_dimension(entity, dimension_id, view, projection, drawing, association_mm=1., general_tolerance=None, confirmed=False, comparison_mode='limits'):
     code = int(entity.dxf.dimtype) & 15
     kind = {0:'linear', 1:'aligned', 3:'diameter', 4:'radius'}.get(code, 'unsupported')
     raw = str(entity.dxf.get('text', '<>'))
@@ -323,16 +388,19 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
         tolerance = Tolerance(-general_tolerance, general_tolerance); source = 'User-enabled project tolerance'
     lower = parsed.nominal_value+tolerance.lower_deviation if tolerance and parsed.nominal_value is not None else None
     upper = parsed.nominal_value+tolerance.upper_deviation if tolerance and parsed.nominal_value is not None else None
+    nominal_result=tolerance_result='Not checked'
     def row(measured, result, reason, features=(), anchors=()):
         return DimensionCheck(dimension_id, view, kind, parsed.nominal_value, measured, lower, upper,
-                              result, reason, features, anchors, source if tolerance else 'Unavailable')
+                              result, reason, features, anchors, source if tolerance else 'Unavailable',nominal_result,tolerance_result)
     if text_error:
         return row(None,'NG','Cannot verify: '+text_error)
     style=entity.override()
     if style.get('dimalt',0) or int(style.get('dimlunit',2))!=2:
         return row(None,'NG','Cannot verify: dual-unit or non-decimal dimension formatting is not supported.')
     prefix=_normalize_text(effective_raw).upper().lstrip()
-    if (prefix.startswith(('⌀','Ø')) and code!=3) or (prefix.startswith('R') and code!=4):
+    linear_diameter=prefix.startswith(('⌀','Ø')) and code in (0,1) and linear_diameter_target(entity,drawing) is not None
+    if linear_diameter:kind='diameter'
+    if (prefix.startswith(('⌀','Ø')) and code!=3 and not linear_diameter) or (prefix.startswith('R') and code!=4):
         return row(None,'NG','Cannot verify: radius/diameter symbol conflicts with native dimension type.')
     if not math.isclose(float(style.get('dimlfac',1)),1.,rel_tol=0,abs_tol=1e-12):
         return row(None,'NG','Cannot verify: scaled DXF dimension (DIMLFAC) requires an explicit drawing scale.')
@@ -346,18 +414,23 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
         parsed=ParsedDimensionText(parsed.nominal_value if parsed.nominal_value is not None and math.isfinite(parsed.nominal_value) else None,None)
         lower=upper=None; tolerance=None
         return row(None,'NG','Cannot verify: invalid numeric dimension or tolerance limits.')
-    if not confirmed:
-        return row(None, 'NG', 'Cannot verify: confirm the selected view/section and alignment.')
     if parsed.nominal_value is None:
         return row(None, 'NG', 'Cannot verify: dimension has no numeric nominal value.')
     if raw == ' ' or any(t in raw.upper() for t in ('REF', 'TYP', 'X', '×')):
         return row(None, 'NG', 'Cannot verify: reference/quantity callout requires explicit feature scope.')
-    if '\\' in raw.replace('\\U+2205','').replace('\\u+2205',''):
+    if '\\' in _normalize_text(raw):
         return row(None, 'NG', 'Cannot verify: unsupported formatted dimension text.')
     try:
-        measured, features, anchors = measure_dimension(entity, projection.primitives, drawing, association_mm)
+        measured, features, anchors = measure_dimension(entity, projection.primitives, drawing, association_mm,linear_diameter)
     except ValueError as exc:
         return row(None, 'NG', f'Cannot verify: {exc}')
+    if not confirmed:
+        return row(measured,'NG','Cannot verify: confirm the selected view/section, alignment and drawing units. Measurement shown is preliminary.',features,anchors)
+    nominal_result='Match' if abs(measured-parsed.nominal_value)<=1e-6 else 'Mismatch'
+    tolerance_result='Not specified' if lower is None or upper is None else 'Within limits' if lower-1e-8<=measured<=upper+1e-8 else 'Outside limits'
+    if comparison_mode=='nominal':
+        return row(measured,'OK' if nominal_result=='Match' else 'NG','Nominal dimensions match (numerical precision 0.000001 mm); tolerance acceptance is separate.' if nominal_result=='Match' else 'Measured geometry differs from the drawing nominal.',features,anchors)
+    if comparison_mode!='limits':return row(measured,'NG','Cannot verify: invalid comparison mode.',features,anchors)
     if lower is None or upper is None:
         return row(measured, 'NG', 'Cannot verify: no explicit or enabled project tolerance.', features, anchors)
     passed = lower-1e-8 <= measured <= upper+1e-8
@@ -366,6 +439,28 @@ def check_dimension(entity, dimension_id, view, projection, drawing, association
 
 def overall_result(checks):
     return 'OK' if checks and all(c.result == 'OK' for c in checks) else 'NG'
+
+
+def unresolved_dimension(entity,dimension_id,reason):
+    """Retain the drawing nominal even if its view could not be measured."""
+    empty=StepProjection('Unassigned',0,0,())
+    row=check_dimension(entity,dimension_id,'Unassigned',empty,(),confirmed=False)
+    return replace(row,measured=None,reason='Cannot verify: '+reason,features=(),anchors=())
+
+
+def suggest_projection(shape,drawing,cache):
+    """Suggest from actual outline size/circles; operator still confirms the view."""
+    lo,hi=bounds(drawing);w,h=np.maximum(hi-lo,1e-9)
+    count=sum(p.kind=='circle' for p in circular_features(drawing))
+    ranked=[]
+    for index,name in enumerate(('top','front','right','bottom','rear','left')):
+        key=('Projection',name,False)
+        if key not in cache:cache[key]=project_visible(shape,name)
+        p=cache[key];cw,ch=max(p.width,1e-9),max(p.height,1e-9)
+        nc=sum(q.kind=='circle' for q in circular_features(p.primitives))
+        score=abs(math.log(cw/w))+abs(math.log(ch/h))+.25*abs(nc-count)
+        ranked.append((score,index,name))
+    return min(ranked)[2]
 
 
 def svg_overlay(drawing, projection, checks=()):

@@ -38,6 +38,7 @@ class Settings(BaseModel):
     association: float = Field(default=1,ge=.001,le=10)
     general_tolerance: float | None = Field(default=None,gt=0,le=100)
     units_confirmed: bool = False
+    comparison_mode: Literal['limits','nominal'] = 'limits'
     views: list[ViewSetting] = Field(default_factory=list,max_length=50)
 
 @asynccontextmanager

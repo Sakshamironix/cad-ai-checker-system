@@ -17,6 +17,14 @@ class DrawingView:
 def _gap(a: EntityLocation, b: EntityLocation) -> float:
     return max(0.0, max(b.minimum.x-a.maximum.x, a.minimum.x-b.maximum.x, b.minimum.y-a.maximum.y, a.minimum.y-b.maximum.y))
 
+
+def dimension_anchors(dimension):
+    """Radius/diameter geometry anchors outrank potentially distant leader text."""
+    if dimension.dimension_type in {'Radius','Diameter'}:
+        return tuple(p for p in (dimension.definition_point,dimension.circular_reference) if p is not None)
+    extension=tuple(p for p in (dimension.extension_line_start,dimension.extension_line_end) if p is not None)
+    return extension or tuple(p for p in (dimension.definition_point,dimension.text_position) if p is not None)
+
 def segment_views(analysis: DxfAnalysis, gap_mm: float = 12.0) -> tuple[DrawingView, ...]:
     """Cluster nearby geometry; annotations are assigned only after geometry is isolated."""
     # INSERT commonly contains the rendered block for a DIMENSION. It must not
@@ -46,9 +54,7 @@ def segment_views(analysis: DxfAnalysis, gap_mm: float = 12.0) -> tuple[DrawingV
             # Extension-line origins are the strongest evidence. Text and the
             # dimension-line position are used only when extension data is absent.
             extension_anchors = anchors[:2]
-            candidates = tuple(point for point in extension_anchors if point is not None)
-            if not candidates:
-                candidates = tuple(point for point in anchors[2:] if point is not None)
+            candidates = dimension_anchors(dimension)
             if candidates and all(
                 minimum.x-gap_mm <= point.x <= maximum.x+gap_mm
                 and minimum.y-gap_mm <= point.y <= maximum.y+gap_mm
@@ -78,11 +84,7 @@ def assign_dimension_view(analysis: DxfAnalysis, views: tuple[DrawingView, ...],
         for point in (dimension.extension_line_start, dimension.extension_line_end)
         if point is not None
     )
-    anchors = extension_anchors or tuple(
-        point
-        for point in (dimension.definition_point, dimension.text_position)
-        if point is not None
-    )
+    anchors = dimension_anchors(dimension)
     if not anchors:
         return None
 

@@ -131,8 +131,9 @@ class DrawingRequirements:
 
 def _normalize_text(text: str) -> str:
     """Normalize common AutoCAD control text and whitespace."""
+    # MTEXT vertical alignment changes presentation only, never dimension meaning.
     normalized = (
-        text.replace("%%c", "⌀")
+        re.sub(r"\\A[012];", "", text).replace("%%c", "⌀")
         .replace("%%C", "⌀")
         .replace("\\U+2205", "⌀")
         .replace("\\u+2205", "⌀")
