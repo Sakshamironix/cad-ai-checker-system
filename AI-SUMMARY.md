@@ -2,7 +2,7 @@
 
 Run the CAD check first. Under **AI summary (optional)**, open **AI summary settings**, choose a provider, enter an accessible model ID and API key, then click **Generate AI Summary**. No request runs on upload, inspection, widget changes or download. No model is selected automatically.
 
-The generated explanation appears beneath the measured results. A successful summary is included in subsequent PDF and JSON downloads and can be downloaded separately. Without a generated summary, existing reports work unchanged. A changed inspection invalidates the previous summary.
+The generated explanation appears in English and Japanese beneath the measured results. Both languages are included in subsequent PDF and JSON downloads, and the bilingual summary can be downloaded separately. Without a generated summary, existing reports work unchanged. A changed inspection invalidates the previous summary.
 
 ## Provider configuration
 

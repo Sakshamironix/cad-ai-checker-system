@@ -16,8 +16,11 @@ def report():
 
 def response(result='NG'):
     return {'result':result,'overview':'The assigned dimension differs from the model.',
-            'findings':[{'dimension':'DIM-001','result':result,'explanation':'Review the stated dimension against the measured feature.'}],
-            'next_steps':['Confirm the intended drawing dimension.']}
+            'overview_ja':'図面の寸法とモデルの測定値が異なります。',
+            'findings':[{'dimension':'DIM-001','result':result,'explanation':'Review the stated dimension against the measured feature.',
+                         'explanation_ja':'図面寸法と測定箇所を確認してください。'}],
+            'next_steps':['Confirm the intended drawing dimension.'],
+            'next_steps_ja':['意図した図面寸法を確認してください。']}
 
 
 @pytest.mark.parametrize('provider',['Gemini','OpenAI','Open-source / compatible API'])
@@ -32,13 +35,16 @@ def test_summary_uses_final_evidence_excludes_files_and_keeps_report_immutable(r
     summary=generate_summary(report,provider,'test-model','secret-key',transport=transport)
     assert len(calls)==1 and report==before and summary['result']=='NG'
     assert summary['report_fingerprint']==report_fingerprint(report)
+    assert summary['overview_ja']==response()['overview_ja']
     assert 'secret-key' not in json.dumps(summary)
     if provider=='OpenAI':assert calls[0][2]['store'] is False
 
 
 @pytest.mark.parametrize('change',[lambda p:p.update(result='OK'),
     lambda p:p['findings'][0].update(result='OK'),lambda p:p['findings'][0].update(dimension='DIM-999'),
-    lambda p:p.update(overview=''),lambda p:p.update(next_steps='not a list')])
+    lambda p:p.update(overview=''),lambda p:p.update(next_steps='not a list'),
+    lambda p:p.pop('overview_ja'),lambda p:p.update(next_steps_ja=[]),
+    lambda p:p['findings'][0].pop('explanation_ja')])
 def test_conflicting_or_invalid_summary_is_discarded(report,change):
     data=response();change(data)
     with pytest.raises(SummaryError):
@@ -84,6 +90,7 @@ def test_optional_button_no_auto_call_and_stale_summary_cleared(report,monkeypat
     assert calls==[]
     app.button(key='generate_inspection_summary').click().run()
     assert not app.exception and len(calls)==1 and app.session_state['report']==report
+    assert {response()['overview'],response()['overview_ja']} <= {item.value for item in app.text}
     app.run();assert len(calls)==1
     changed=copy.deepcopy(report);changed['generated_at']='new-inspection';app.session_state['report']=changed;app.run()
     assert not app.exception and 'inspection_ai_summary' not in app.session_state and len(calls)==1
@@ -101,4 +108,5 @@ def test_pdf_includes_ai_only_for_current_report(report,monkeypatch):
     stale=pdf_report({**report,'generated_at':'new inspection'},summary)
     assert b'The assigned dimension differs from the model.' not in plain
     assert b'The assigned dimension differs from the model.' in included
+    assert b'HeiseiKakuGo-W5' in included and b'HeiseiKakuGo-W5' not in plain
     assert b'The assigned dimension differs from the model.' not in stale

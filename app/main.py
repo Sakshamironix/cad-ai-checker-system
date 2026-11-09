@@ -19,7 +19,7 @@ from app.dxf_reader import analyze_dxf_bytes
 from app.view_segmentation import segment_views
 from app.step_section import section_shape
 from app.visual_workspace import header, comparison_panels, svg_projection_sheet
-from app.inspection_summary import render_summary_controls, report_fingerprint
+from app.inspection_summary import render_summary_controls, report_fingerprint, summary_sections
 
 APP_NAME = 'CAD AI Checker'
 APP_STAGE = 'Geometry-based dimension verification'
@@ -48,15 +48,31 @@ def pdf_report(payload, ai_summary=None):
                       f"Nominal comparison: {row.get('nominal_result','Not checked')} | Tolerance: {row.get('tolerance_result','Not checked')}",
                       f"Features: {', '.join(row['features'])}", row['reason'], ''])
     lines += ['View and section settings:', json.dumps(payload['views'], ensure_ascii=True)]
+    def draw_line(line,font='Helvetica'):
+        nonlocal y
+        if y < 45: c.showPage(); y = 805
+        c.setFont(font,8); c.drawString(30,y,line); y -= 12
     if ai_summary and ai_summary.get('report_fingerprint')==report_fingerprint(payload):
         lines += ['', 'Optional AI-generated explanation (review against measured evidence)',
-                  f"Provider: {ai_summary['provider']} | Model: {ai_summary['model']}", ai_summary['overview']]
-        lines += [f"{f['dimension']} | {f['result']} | {f['explanation']}" for f in ai_summary['findings']]
-        lines += ['Suggested review: '+step for step in ai_summary['next_steps']]
+                  f"Provider: {ai_summary['provider']} | Model: {ai_summary['model']}"]
     for text in lines:
         for line in textwrap.wrap(text, 100) or ['']:
-            if y < 45: c.showPage(); y = 805
-            c.setFont('Helvetica', 8); c.drawString(30, y, line); y -= 12
+            draw_line(line)
+    if ai_summary and ai_summary.get('report_fingerprint')==report_fingerprint(payload):
+        from reportlab.lib.textsplit import wordSplit
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        jp_font='HeiseiKakuGo-W5'
+        for title,suffix,body in summary_sections(ai_summary):
+            font=jp_font if suffix else 'Helvetica'
+            if suffix and font not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(UnicodeCIDFont(font))
+            draw_line('')
+            draw_line(title,font)
+            for paragraph in body:
+                for source_line in paragraph.splitlines():
+                    for _,line in wordSplit(source_line,A4[0]-60,font,8):
+                        draw_line(line,font)
     c.save(); return buffer.getvalue()
 
 
@@ -220,7 +236,7 @@ def run_workspace():
         x,y,z=st.columns(3)
         x.download_button('Download CSV',output.getvalue().encode('utf-8-sig'),'dimension-check.csv','text/csv')
         export_report={**report,**({'ai_summary':ai_summary} if ai_summary else {})}
-        y.download_button('Download JSON',json.dumps(export_report,indent=2),'dimension-check.json','application/json')
+        y.download_button('Download JSON',json.dumps(export_report,indent=2,ensure_ascii=False),'dimension-check.json','application/json')
         z.download_button('Download PDF',pdf_report(report,ai_summary),'dimension-check.pdf','application/pdf')
 
 
