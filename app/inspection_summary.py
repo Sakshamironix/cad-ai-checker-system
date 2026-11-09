@@ -4,6 +4,9 @@ import hashlib
 import json
 import os
 import re
+import socket
+import ssl
+from http.client import RemoteDisconnected
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -57,11 +60,12 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):return None
 
 
-def post_json(url, headers, payload):
+def post_json(url, headers, payload, *, timeout_seconds=None):
     request=Request(url,data=json.dumps(payload,allow_nan=False).encode(),
                     headers={'Content-Type':'application/json',**headers},method='POST')
     try:
-        with build_opener(_NoRedirect()).open(request,timeout=load_runtime_limits().ai_request_timeout_seconds) as response:
+        timeout=timeout_seconds if timeout_seconds is not None else load_runtime_limits().ai_request_timeout_seconds
+        with build_opener(_NoRedirect()).open(request,timeout=timeout) as response:
             data=response.read(262145)
         if len(data)>262144:raise SummaryError('AI response exceeded the size limit.')
         decoded=json.loads(data)
@@ -69,8 +73,19 @@ def post_json(url, headers, payload):
         return decoded
     except HTTPError as exc:
         raise SummaryError(f'AI provider returned HTTP {exc.code}. Check the key, model access and quota; the CAD report is unchanged.') from None
-    except (URLError,TimeoutError,OSError):
-        raise SummaryError('AI provider could not be reached. The CAD report is unchanged; try again later.') from None
+    except (URLError,OSError) as exc:
+        reason=exc.reason if isinstance(exc,URLError) else exc
+        if isinstance(reason,TimeoutError):
+            detail='The AI request timed out before a complete response. Try a faster model or retry later.'
+        elif isinstance(reason,socket.gaierror):
+            detail='The server could not resolve the AI provider hostname.'
+        elif isinstance(reason,ssl.SSLError):
+            detail='The server could not establish a verified HTTPS connection to the AI provider.'
+        elif isinstance(reason,(RemoteDisconnected,ConnectionResetError)):
+            detail='The AI connection closed before a complete response. Retry later.'
+        else:
+            detail='The server could not connect to the AI provider. Retry later.'
+        raise SummaryError(f'{detail} The CAD report is unchanged.') from None
     except (ValueError,UnicodeError):
         raise SummaryError('AI provider returned an invalid response. The CAD report is unchanged.') from None
 
@@ -121,7 +136,12 @@ def generate_summary(report,provider,model='',api_key='',*,transport=None):
                  'response_format':{'type':'json_object'}}
         headers={'Authorization':'Bearer '+key} if key else {}
         if provider=='OpenAI':payload['store']=False
-    response=(transport or post_json)(url,headers,payload)
+    if transport is not None:
+        response=transport(url,headers,payload)
+    elif provider=='Gemini':
+        response=post_json(url,headers,payload,timeout_seconds=max(90,load_runtime_limits().ai_request_timeout_seconds))
+    else:
+        response=post_json(url,headers,payload)
     try:
         if provider=='Gemini':raw=''.join(p.get('text','') for p in response['candidates'][0]['content']['parts'])
         else:raw=response['choices'][0]['message']['content']
@@ -169,7 +189,7 @@ def render_summary_controls(report):
             with st.spinner('Generating AI summary…'):
                 summary=generate_summary(report,provider,model,key)
             st.session_state.inspection_ai_summary=summary
-        except SummaryError as exc:st.warning(str(exc))
+        except SummaryError as exc:st.warning(f'{provider}: {exc}')
         except Exception:st.warning('AI summary could not be generated. Your inspection report remains available.')
     summary=st.session_state.get('inspection_ai_summary')
     if summary and summary.get('report_fingerprint')==fingerprint:

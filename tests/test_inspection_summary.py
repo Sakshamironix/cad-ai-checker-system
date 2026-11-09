@@ -1,5 +1,8 @@
 import copy
 import json
+import socket
+import ssl
+from urllib.error import URLError
 import pytest
 from app.inspection_summary import (SummaryError,generate_summary,evidence_for_summary,
                                     provider_configuration,report_fingerprint)
@@ -73,6 +76,31 @@ def test_only_server_configured_https_or_loopback_endpoints(monkeypatch):
     with pytest.raises(SummaryError):provider_configuration('Open-source / compatible API','model')
     monkeypatch.setenv('CAD_SUMMARY_BASE_URL','https://server.example/v1')
     assert provider_configuration('Open-source / compatible API','model')[2]=='https://server.example/v1/chat/completions'
+
+
+@pytest.mark.parametrize('failure,message',[
+    (TimeoutError('private-timeout-detail'),'timed out'),
+    (URLError(socket.gaierror('private-dns-detail')),'resolve'),
+    (URLError(ssl.SSLError('private-tls-detail')),'verified HTTPS'),
+    (ConnectionResetError('private-reset-detail'),'connection closed'),
+])
+def test_network_failures_are_distinguished_without_leaking_details(monkeypatch,failure,message):
+    import app.inspection_summary as module
+    class Opener:
+        def open(self,*args,**kwargs):raise failure
+    monkeypatch.setattr(module,'build_opener',lambda *a:Opener())
+    with pytest.raises(SummaryError,match=message) as exc:
+        module.post_json('https://provider.invalid',{}, {})
+    assert 'private-' not in str(exc.value)
+
+
+def test_gemini_allows_more_time_for_generation(report,monkeypatch):
+    import app.inspection_summary as module
+    def post(url,headers,payload,*,timeout_seconds):
+        assert timeout_seconds>=90
+        return {'candidates':[{'content':{'parts':[{'text':json.dumps(response())}]}}]}
+    monkeypatch.setattr(module,'post_json',post)
+    assert generate_summary(report,'Gemini','test','test-key')['result']=='NG'
 
 
 def test_optional_button_no_auto_call_and_stale_summary_cleared(report,monkeypatch):
